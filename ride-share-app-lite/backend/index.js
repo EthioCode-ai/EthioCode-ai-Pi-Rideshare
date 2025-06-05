@@ -15,4 +15,4 @@ app.use('/api/rides', rideRoutes);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
-sequelize.sync({ force: true });
+sequelize.sync({ force: true }); // Remove { force: true } in production
