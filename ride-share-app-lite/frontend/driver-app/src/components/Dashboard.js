@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Box, Button, List, ListItem, ListItemText } from '@mui/material';
 import axios from 'axios';
+import io from 'socket.io-client';
+
+const socket = io('http://localhost:5000');
 
 const Dashboard = () => {
   const [rides, setRides] = useState([]);
+  const [activeRide, setActiveRide] = useState(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchRides = async () => {
@@ -18,6 +24,8 @@ const Dashboard = () => {
       }
     };
     fetchRides();
+
+    return () => socket.disconnect();
   }, []);
 
   const acceptRide = async (rideId) => {
@@ -27,9 +35,25 @@ const Dashboard = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       setRides(rides.filter((ride) => ride.id !== rideId));
+      setActiveRide(rideId);
+      socket.emit('joinRide', rideId);
       alert('Ride accepted');
+      navigate(`/ride-tracking/${rideId}`);
     } catch (error) {
       alert('Failed to accept ride: ' + (error.response?.data?.message || 'Unknown error'));
+    }
+  };
+
+  const updateLocation = () => {
+    if (activeRide) {
+      const latitude = 37.7749 + (Math.random() - 0.5) * 0.01;
+      const longitude = -122.4194 + (Math.random() - 0.5) * 0.01;
+      socket.emit('updateLocation', {
+        rideId: activeRide,
+        latitude,
+        longitude,
+      });
+      console.log(`Location updated for ride ${activeRide}: ${latitude}, ${longitude}`);
     }
   };
 
@@ -47,6 +71,12 @@ const Dashboard = () => {
           </ListItem>
         ))}
       </List>
+      {activeRide && (
+        <Box sx={{ mt: 3 }}>
+          <h3>Active Ride: {activeRide}</h3>
+          <Button variant="contained" onClick={updateLocation}>Update Location</Button>
+        </Box>
+      )}
     </Box>
   );
 };
