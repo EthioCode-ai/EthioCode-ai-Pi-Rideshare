@@ -4,7 +4,6 @@ const Ride = require('../models/Ride');
 
 const router = express.Router();
 
-// Middleware to verify JWT
 const authMiddleware = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'No token provided' });
@@ -16,7 +15,6 @@ const authMiddleware = (req, res, next) => {
   });
 };
 
-// Request a ride
 router.post('/request', authMiddleware, async (req, res) => {
   if (req.user.role !== 'rider') return res.status(403).json({ message: 'Only riders can request rides' });
 
@@ -33,7 +31,6 @@ router.post('/request', authMiddleware, async (req, res) => {
   }
 });
 
-// Get available rides
 router.get('/available', authMiddleware, async (req, res) => {
   if (req.user.role !== 'driver') return res.status(403).json({ message: 'Only drivers can view rides' });
 
@@ -41,7 +38,6 @@ router.get('/available', authMiddleware, async (req, res) => {
   res.json(rides);
 });
 
-// Accept a ride
 router.put('/accept/:id', authMiddleware, async (req, res) => {
   if (req.user.role !== 'driver') return res.status(403).json({ message: 'Only drivers can accept rides' });
 
