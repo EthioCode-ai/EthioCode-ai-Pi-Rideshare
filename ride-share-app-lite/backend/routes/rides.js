@@ -24,10 +24,12 @@ router.post('/request', authMiddleware, async (req, res) => {
       pickupLocation,
       dropoffLocation,
       riderId: req.user.id,
+      status: 'pending',
+      paymentStatus: 'pending',
     });
     res.status(201).json({ message: 'Ride requested', ride });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    res.status(400).json({ error: error.message, details: error.errors ? error.errors.map(e => e.message) : [] });
   }
 });
 
@@ -50,6 +52,32 @@ router.put('/accept/:id', authMiddleware, async (req, res) => {
   ride.status = 'accepted';
   await ride.save();
   res.json({ message: 'Ride accepted', ride });
+});
+
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    const ride = await Ride.findByPk(req.params.id);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+    if (ride.driverId !== req.user.id && ride.riderId !== req.user.id) {
+      return res.status(403).json({ message: 'Unauthorized' });
+    }
+    res.json(ride);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/update-payment', async (req, res) => {
+  const { rideId, paymentStatus } = req.body;
+  try {
+    const ride = await Ride.findByPk(rideId);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+    ride.paymentStatus = paymentStatus;
+    await ride.save();
+    res.json({ message: 'Payment status updated', ride });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 module.exports = router;
