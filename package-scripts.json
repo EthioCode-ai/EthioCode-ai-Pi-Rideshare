@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "build:rider": "cd rider-app && npm run build",
+    "build:driver": "cd driver-app && npm run build",
+    "build:all": "npm run build:rider && npm run build:driver",
+    "dev:rider": "cd rider-app && npm run dev",
+    "dev:driver": "cd driver-app && npm run dev",
+    "cap:sync:rider": "cd rider-app && npm run cap:sync",
+    "cap:sync:driver": "cd driver-app && npm run cap:sync",
+    "cap:sync:all": "npm run cap:sync:rider && npm run cap:sync:driver"
+  }
+}

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>We need your location to match you with nearby riders and provide navigation</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>We track your location continuously to provide real-time updates to riders during active trips</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>Background location tracking is required to accept ride requests and navigate to pickup locations</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Take photos of your driver's license and vehicle documents for verification</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Select photos for your driver profile and vehicle documentation</string>
+    <key>NSUserTrackingUsageDescription</key>
+    <string>This helps us provide optimized ride matching and earnings insights</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>location</string>
+        <string>remote-notification</string>
+        <string>fetch</string>
+    </array>
+</dict>
+</plist>

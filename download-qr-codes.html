@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi VIP Rideshare - App Download QR Codes</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 50px;
+        }
+        
+        .header h1 {
+            font-size: 48px;
+            margin: 0;
+            font-weight: 700;
+        }
+        
+        .pi-symbol {
+            font-size: 64px;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            font-size: 20px;
+            opacity: 0.9;
+            margin-top: 10px;
+        }
+        
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .qr-card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .qr-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .qr-image {
+            width: 250px;
+            height: 250px;
+            margin: 0 auto 20px;
+            background: white;
+            border: 2px solid #f1f5f9;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .qr-image img {
+            width: 230px;
+            height: 230px;
+            border-radius: 10px;
+        }
+        
+        .qr-title {
+            font-size: 26px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 10px;
+        }
+        
+        .qr-description {
+            color: #64748b;
+            margin-bottom: 20px;
+            line-height: 1.5;
+            font-size: 16px;
+        }
+        
+        .download-btn {
+            background: #4F46E5;
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .download-btn:hover {
+            background: #4338ca;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        
+        .rider .download-btn { 
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+        }
+        .rider .download-btn:hover { 
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        }
+        
+        .driver .download-btn { 
+            background: linear-gradient(135deg, #10b981, #059669);
+        }
+        .driver .download-btn:hover { 
+            background: linear-gradient(135deg, #059669, #047857);
+        }
+        
+        .badge {
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: inline-block;
+        }
+        
+        .install-badge {
+            background: linear-gradient(135deg, #34d399, #10b981);
+        }
+        
+        .instructions {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-top: 40px;
+        }
+        
+        .instructions h3 {
+            color: #1e293b;
+            margin-top: 0;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        
+        .instructions ul {
+            color: #64748b;
+            line-height: 1.8;
+            font-size: 16px;
+        }
+        
+        .instructions li {
+            margin-bottom: 12px;
+        }
+        
+        .footer {
+            text-align: center;
+            color: white;
+            margin-top: 50px;
+            opacity: 0.9;
+        }
+        
+        .highlight {
+            background: linear-gradient(135deg, #fef3c7, #fbbf24);
+            padding: 20px;
+            border-radius: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="pi-symbol">π</div>
+            <h1>Pi VIP Rideshare</h1>
+            <p class="subtitle">🚀 App Download QR Codes - Ready for Distribution!</p>
+        </div>
+        
+        <div class="qr-grid">
+            <!-- Rider App Download QR -->
+            <div class="qr-card rider">
+                <div class="badge install-badge">📱 INSTALL APP</div>
+                <div class="qr-image">
+                    <img src="pi-vip-rider-download-qr.png" alt="Pi VIP Rider App Download QR Code">
+                </div>
+                <div class="qr-title">🚗 Rider App Download</div>
+                <div class="qr-description">
+                    <strong>Triggers PWA Installation!</strong><br>
+                    Perfect for marketing materials - prompts users to install the Rider app directly on their phone
+                </div>
+                <a href="pi-vip-rider-download-qr.png" download="Pi-VIP-Rider-Download-QR.png" class="download-btn">
+                    💾 Download QR Code
+                </a>
+            </div>
+            
+            <!-- Driver App Download QR -->
+            <div class="qr-card driver">
+                <div class="badge install-badge">📱 INSTALL APP</div>
+                <div class="qr-image">
+                    <img src="pi-vip-driver-download-qr.png" alt="Pi VIP Driver App Download QR Code">
+                </div>
+                <div class="qr-title">🚙 Driver App Download</div>
+                <div class="qr-description">
+                    <strong>Triggers PWA Installation!</strong><br>
+                    Perfect for driver recruitment - prompts drivers to install the app and start earning
+                </div>
+                <a href="pi-vip-driver-download-qr.png" download="Pi-VIP-Driver-Download-QR.png" class="download-btn">
+                    💾 Download QR Code
+                </a>
+            </div>
+        </div>
+        
+        <div class="highlight">
+            <h3 style="margin-top: 0; color: #1e293b;">✨ What Makes These QR Codes Special?</h3>
+            <ul style="margin-bottom: 0;">
+                <li><strong>🎯 Direct App Installation:</strong> Scans lead to dedicated download pages with PWA install prompts</li>
+                <li><strong>📱 Mobile Optimized:</strong> Automatic detection of iOS/Android with platform-specific instructions</li>
+                <li><strong>🚀 One-Click Install:</strong> Users get "Add to Home Screen" prompts for app-like experience</li>
+                <li><strong>📊 Demo Ready:</strong> Includes demo login credentials for instant testing</li>
+            </ul>
+        </div>
+        
+        <div class="instructions">
+            <h3>🌍 Perfect for Soft Launch Distribution</h3>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px; margin: 30px 0;">
+                <div>
+                    <h4 style="color: #3b82f6; margin-bottom: 15px;">📢 Marketing Materials</h4>
+                    <ul>
+                        <li>Business cards & flyers</li>
+                        <li>Posters & banners</li>
+                        <li>Vehicle decals</li>
+                        <li>Event booth displays</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h4 style="color: #10b981; margin-bottom: 15px;">📱 Digital Campaigns</h4>
+                    <ul>
+                        <li>Social media posts</li>
+                        <li>Instagram stories</li>
+                        <li>Email signatures</li>
+                        <li>Website integration</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h4 style="color: #f59e0b; margin-bottom: 15px;">👥 Recruitment</h4>
+                    <ul>
+                        <li>Driver recruitment flyers</li>
+                        <li>Job board postings</li>
+                        <li>Word-of-mouth campaigns</li>
+                        <li>Referral programs</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div style="background: #f0f9ff; padding: 20px; border-radius: 12px; border-left: 4px solid #3b82f6;">
+                <h4 style="color: #1e40af; margin-top: 0;">🎯 Pro Tip for Maximum Impact:</h4>
+                <p style="color: #1e40af; margin-bottom: 0;">
+                    Use the <strong>Rider Download QR</strong> for customer acquisition and the <strong>Driver Download QR</strong> for driver recruitment. 
+                    Each QR code leads to a specialized download experience optimized for that user type!
+                </p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p style="font-size: 18px; font-weight: 600;">🌟 Pi VIP Rideshare</p>
+            <p>Ready to conquer the rideshare market - one scan at a time!</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,248 @@
+run = "npm run dev"
+modules = ["nodejs-20", "postgresql-16", "python-3.11"]
+hidden = [".config", "tsconfig.json", "tsconfig.node.json", "vite.config.js", ".gitignore"]
+entrypoint = "src/App.tsx"
+
+[nix]
+channel = "stable-24_05"
+packages = ["cairo", "ffmpeg-full", "freetype", "ghostscript", "glibcLocales", "gobject-introspection", "gtk3", "libxcrypt", "pkg-config", "qhull", "tcl", "tk", "xsimd"]
+
+[unitTest]
+language = "nodejs"
+
+[deployment]
+deploymentTarget = "vm"
+build = ["npm", "install"]
+publicDir = "dist"
+run = ["npm", "run", "dev:all"]
+
+[[deployment.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[[ports]]
+localPort = 3001
+externalPort = 3001
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 4200
+
+[[ports]]
+localPort = 5002
+externalPort = 5173
+
+[[ports]]
+localPort = 40603
+externalPort = 5000
+
+[[ports]]
+localPort = 41947
+externalPort = 3002
+
+[[ports]]
+localPort = 43593
+externalPort = 6800
+
+[[ports]]
+localPort = 44189
+externalPort = 8000
+
+[[ports]]
+localPort = 44565
+externalPort = 3000
+
+[[ports]]
+localPort = 45687
+externalPort = 3003
+
+[[ports]]
+localPort = 46503
+externalPort = 6000
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Development Server"
+author = 46760603
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Rider App Server"
+author = 46760603
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Rider App Server"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Rider App Server"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"The rider app is integrated into the main React app. Navigate to /rider route to see the maps.\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"Main app is running on the Development Server workflow.\""
+
+[[workflows.workflow]]
+name = "Main App"
+author = 46760603
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Full Stack"
+author = 46760603
+mode = "parallel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd server && npm install && node index.js"
+
+[[workflows.workflow]]
+name = "Start Development"
+author = 46760603
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Full Stack Dev"
+author = 46760603
+mode = "parallel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd server && npm install && node index.js"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Test Full System"
+author = 46760603
+mode = "parallel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd server && npm install && node index.js"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Live Test System"
+author = 46760603
+mode = "parallel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pkill -f \"node index.js\" || echo \"No existing server to kill\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "sleep 2"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd server && node index.js"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Debug Server"
+author = 46760603
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pkill -f \"node index.js\" || echo \"No existing server to kill\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd server && node index.js"
+
+[[workflows.workflow]]
+name = "Stable Server"
+author = 46760603
+mode = "parallel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd server && node index.js"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Fixed Development"
+author = 46760603
+mode = "parallel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pkill -f \"node index.js\" || echo \"Cleaning up old servers\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "sleep 3"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd server && node index.js"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "RideShare App"
+
+[[workflows.workflow]]
+name = "RideShare App"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev:all"
+waitForPort = 5000
+
+[agent]
+expertMode = true
+integrations = ["javascript_openai:1.0.0", "javascript_stripe:1.0.0"]

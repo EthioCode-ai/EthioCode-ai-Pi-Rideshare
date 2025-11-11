@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.*
+!.env.production.example
+.local
+.config
+__pycache__/
+*.pyc *.pyo *.pyd
+dist/
+build/
+coverage/
+uploads/
+*.log
+*.tar *.tar.gz *.zip
+.DS_Store
+Thumbs.db

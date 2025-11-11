@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi Rider App - Updated Design Preview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f0f0f0;
+            padding: 20px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .phone {
+            width: 375px;
+            height: 812px;
+            background: white;
+            border-radius: 40px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border: 12px solid #1a1a1a;
+            position: relative;
+        }
+
+        .notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 30px;
+            background: #1a1a1a;
+            border-radius: 0 0 20px 20px;
+            z-index: 100;
+        }
+
+        .status-bar {
+            height: 44px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            padding-top: 10px;
+            font-size: 12px;
+        }
+
+        .map-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #e8e8e8 0%, #f5f5f5 50%, #ececec 100%);
+            background-image: 
+                repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(200,200,200,.1) 35px, rgba(200,200,200,.1) 70px),
+                repeating-linear-gradient(-45deg, transparent, transparent 35px, rgba(200,200,200,.1) 35px, rgba(200,200,200,.1) 70px);
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 44px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: space-between;
+            padding: 15px 20px;
+            z-index: 10;
+        }
+
+        .icon-btn {
+            width: 40px;
+            height: 40px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .pi-logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #6366f1;
+        }
+
+        .user-marker {
+            position: absolute;
+            top: 45%;
+            left: 25%;
+            width: 40px;
+            height: 40px;
+            background: #fbbf24;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 4px 12px rgba(251,191,36,0.4);
+        }
+
+        .car-marker {
+            position: absolute;
+            font-size: 24px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+        }
+
+        .bottom-card {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-radius: 30px 30px 0 0;
+            padding: 24px 20px 40px;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+        }
+
+        .time-badge {
+            background: rgba(0,0,0,0.6);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 20px;
+            display: inline-block;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #f5f5f5;
+            border-radius: 12px;
+            margin-top: 8px;
+        }
+
+        .search-box input {
+            border: none;
+            background: none;
+            font-size: 16px;
+            flex: 1;
+            outline: none;
+        }
+
+        .yellow-banner {
+            position: absolute;
+            top: 100px;
+            left: 20px;
+            right: 20px;
+            background: #fbbf24;
+            padding: 12px 16px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(251,191,36,0.3);
+        }
+
+        .route-line {
+            position: absolute;
+            top: 35%;
+            left: 30%;
+            width: 200px;
+            height: 2px;
+            background: repeating-linear-gradient(90deg, #1a1a1a 0, #1a1a1a 10px, transparent 10px, transparent 20px);
+            transform: rotate(-25deg);
+        }
+
+        .location-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .location-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+
+        .location-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .location-dot.start {
+            background: #10b981;
+        }
+
+        .location-dot.finish {
+            background: #ef4444;
+        }
+
+        .location-content {
+            flex: 1;
+        }
+
+        .location-label {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 2px;
+        }
+
+        .location-text {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .add-stop-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            background: white;
+            border: 1px dashed #ccc;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        .schedule-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .car-options {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+
+        .car-card {
+            background: #f5f5f5;
+            padding: 16px;
+            border-radius: 12px;
+            min-width: 140px;
+            text-align: center;
+            cursor: pointer;
+            border: 2px solid transparent;
+            position: relative;
+        }
+
+        .car-card.selected {
+            border-color: #1a1a1a;
+            background: white;
+        }
+
+        .car-image {
+            width: 80px;
+            height: 50px;
+            margin: 0 auto 8px;
+            background: linear-gradient(135deg, #94a3b8 0%, #cbd5e1 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .car-image::before {
+            content: '';
+            position: absolute;
+            width: 60%;
+            height: 30%;
+            background: #334155;
+            border-radius: 4px 4px 0 0;
+            top: 25%;
+        }
+
+        .car-image::after {
+            content: '';
+            position: absolute;
+            width: 75%;
+            height: 45%;
+            background: #475569;
+            border-radius: 8px;
+            bottom: 15%;
+        }
+
+        .car-card.premium .car-image {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        }
+
+        .car-card.premium .car-image::before {
+            background: #0f172a;
+        }
+
+        .car-card.premium .car-image::after {
+            background: #1e293b;
+        }
+
+        .car-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .car-price {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1a1a1a;
+        }
+
+        .car-seats {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .payment-options {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .payment-btn {
+            flex: 1;
+            padding: 12px;
+            background: #f5f5f5;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .book-btn {
+            width: 100%;
+            padding: 18px;
+            background: #1a1a1a;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .search-header {
+            text-align: center;
+            padding: 60px 20px 40px;
+        }
+
+        .search-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .loading-dots {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            background: #ccc;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
+
+        .cancel-btn {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 40px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            cursor: pointer;
+        }
+
+        .screen-label {
+            text-align: center;
+            margin-top: 15px;
+            font-weight: 600;
+            color: #333;
+            max-width: 375px;
+        }
+
+        .feature-note {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="phone">
+            <div class="notch"></div>
+            
+            <div class="status-bar">
+                <span>9:41</span>
+                <span>📶 📡 🔋</span>
+            </div>
+
+            <div class="map-background"></div>
+
+            <div class="top-bar">
+                <div class="icon-btn">☰</div>
+                <div class="icon-btn pi-logo">π</div>
+                <div class="icon-btn">🔔</div>
+            </div>
+
+            <div class="user-marker">👑</div>
+            <div class="car-marker" style="top: 52%; left: 35%;">🚗</div>
+            <div class="car-marker" style="top: 38%; left: 60%; font-size: 20px;">🚕</div>
+
+            <div class="bottom-card">
+                <div class="time-badge">Good time to go · Now</div>
+                
+                <div class="search-box">
+                    <span>📍</span>
+                    <input type="text" placeholder="Let's go to Home" />
+                    <span>🔍</span>
+                </div>
+            </div>
+        </div>
+        <div class="screen-label">
+            Screen 1: Home / Ready State
+        </div>
+    </div>
+
+    <div>
+        <div class="phone">
+            <div class="notch"></div>
+            
+            <div class="status-bar">
+                <span>9:41</span>
+                <span>📶 📡 🔋</span>
+            </div>
+
+            <div class="map-background"></div>
+
+            <div class="top-bar">
+                <div class="icon-btn">☰</div>
+                <div class="icon-btn pi-logo">π</div>
+                <div class="icon-btn">🔔</div>
+            </div>
+
+            <div class="user-marker" style="top: 30%; left: 28%;">📍</div>
+            <div class="user-marker" style="top: 50%; left: 65%; background: #1a1a1a;">📍</div>
+            <div class="route-line"></div>
+
+            <div class="yellow-banner">
+                🚗 To the point of stay · 16 min
+            </div>
+
+            <div class="bottom-card" style="padding-bottom: 30px;">
+                <div class="location-row">
+                    <div class="location-item">
+                        <div class="location-dot start"></div>
+                        <div class="location-content">
+                            <div class="location-label">Start</div>
+                            <div class="location-text">My location</div>
+                        </div>
+                    </div>
+                    <div class="location-item">
+                        <div class="location-dot finish"></div>
+                        <div class="location-content">
+                            <div class="location-label">Finish</div>
+                            <div class="location-text">Restoran</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="add-stop-btn">
+                    <span style="font-size: 18px;">+</span>
+                    <span>Add a Stop</span>
+                </div>
+
+                <div class="schedule-btn">
+                    <span>🕐</span>
+                    <span>Schedule Your Ride</span>
+                    <span style="margin-left: auto; font-size: 12px; color: #999;">›</span>
+                </div>
+
+                <div class="car-options">
+                    <div class="car-card selected">
+                        <div class="car-image"></div>
+                        <div class="car-name">BasicX</div>
+                        <div class="car-price">$12.8</div>
+                        <div class="car-seats">👤 1-3</div>
+                    </div>
+                    <div class="car-card premium">
+                        <div class="car-image"></div>
+                        <div class="car-name">PremiumXL</div>
+                        <div class="car-price">$18.5</div>
+                        <div class="car-seats">👤 1-6</div>
+                    </div>
+                </div>
+
+                <div class="payment-options">
+                    <button class="payment-btn">💵 Cash</button>
+                    <button class="payment-btn">💳 Card</button>
+                </div>
+
+                <button class="book-btn">Book Now</button>
+            </div>
+        </div>
+        <div class="screen-label">
+            Screen 2: Trip Selection & Booking
+            <div class="feature-note">✅ "Add a Stop" appears between locations</div>
+            <div class="feature-note">✅ "Schedule Your Ride" above car selection</div>
+        </div>
+    </div>
+
+    <div>
+        <div class="phone">
+            <div class="notch"></div>
+            
+            <div class="status-bar">
+                <span>9:41</span>
+                <span>📶 📡 🔋</span>
+            </div>
+
+            <div class="map-background"></div>
+
+            <div class="top-bar">
+                <div class="icon-btn">☰</div>
+                <div class="icon-btn pi-logo">π</div>
+                <div class="icon-btn">🔔</div>
+            </div>
+
+            <div class="user-marker" style="top: 50%; left: 45%;">👑</div>
+            <div class="car-marker" style="top: 30%; left: 25%;">🚗</div>
+            <div class="car-marker" style="top: 35%; left: 70%;">🚕</div>
+            <div class="car-marker" style="top: 60%; left: 65%; font-size: 20px;">🚙</div>
+            <div class="car-marker" style="top: 65%; left: 25%; font-size: 18px;">🚗</div>
+
+            <div class="search-header">
+                <div style="font-size: 48px; margin-bottom: 16px;">🚗</div>
+                <div class="search-title">Search drivers...</div>
+                <div class="loading-dots">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                </div>
+            </div>
+
+            <button class="cancel-btn">Cancel</button>
+        </div>
+        <div class="screen-label">Screen 3: Searching for Driver</div>
+    </div>
+</body>
+</html>

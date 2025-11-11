@@ -1,0 +1,222 @@
+//@version=5
+strategy("EURUSD Profit Maximizer - Multi-Timeframe Adaptive Strategy", 
+         shorttitle="EURUSD-PM", 
+         overlay=true, 
+         default_qty_type=strategy.percent_of_equity, 
+         default_qty_value=2,
+         initial_capital=10000,
+         commission_type=strategy.commission.cash_per_order, 
+         commission_value=3,
+         slippage=2)
+
+// === INPUTS ===
+// Trend Following Parameters
+trendMA_length = input.int(21, "Trend MA Length", minval=5, maxval=50)
+signalMA_length = input.int(9, "Signal MA Length", minval=3, maxval=21)
+atr_length = input.int(14, "ATR Length")
+atr_multiplier = input.float(2.5, "ATR Stop Multiplier", minval=1.0, maxval=5.0, step=0.1)
+
+// RSI Parameters
+rsi_length = input.int(14, "RSI Length")
+rsi_overbought = input.float(70, "RSI Overbought", minval=60, maxval=90)
+rsi_oversold = input.float(30, "RSI Oversold", minval=10, maxval=40)
+
+// MACD Parameters
+macd_fast = input.int(12, "MACD Fast")
+macd_slow = input.int(26, "MACD Slow")
+macd_signal = input.int(9, "MACD Signal")
+
+// Risk Management
+max_risk_per_trade = input.float(1.0, "Max Risk Per Trade (%)", minval=0.1, maxval=5.0, step=0.1)
+take_profit_multiplier = input.float(2.0, "Take Profit Multiplier", minval=1.0, maxval=5.0, step=0.1)
+trailing_stop_activation = input.float(1.5, "Trailing Stop Activation (ATR)", minval=0.5, maxval=3.0, step=0.1)
+
+// Session Filter
+london_session = input.bool(true, "Trade London Session")
+new_york_session = input.bool(true, "Trade New York Session")
+tokyo_session = input.bool(false, "Trade Tokyo Session")
+
+// === TECHNICAL INDICATORS ===
+// Moving Averages
+trend_ma = ta.ema(close, trendMA_length)
+signal_ma = ta.sma(close, signalMA_length)
+
+// ATR for volatility
+atr = ta.atr(atr_length)
+
+// RSI
+rsi = ta.rsi(close, rsi_length)
+
+// MACD
+[macd_line, signal_line, macd_hist] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+
+// Bollinger Bands
+bb_length = 20
+bb_mult = 2.0
+bb_basis = ta.sma(close, bb_length)
+bb_dev = bb_mult * ta.stdev(close, bb_length)
+bb_upper = bb_basis + bb_dev
+bb_lower = bb_basis - bb_dev
+
+// === HIGHER TIMEFRAME ANALYSIS ===
+htf_timeframe = timeframe.period == "1" ? "5" : timeframe.period == "5" ? "15" : "1H"
+htf_trend_ma = request.security(syminfo.tickerid, htf_timeframe, ta.ema(close, trendMA_length))
+htf_trend_direction = close > htf_trend_ma ? 1 : -1
+
+// === SESSION FILTERS ===
+is_london = london_session and (hour >= 8 and hour <= 16)
+is_new_york = new_york_session and (hour >= 13 and hour <= 21)
+is_tokyo = tokyo_session and (hour >= 0 and hour <= 8)
+valid_session = is_london or is_new_york or is_tokyo
+
+// === MARKET STRUCTURE ===
+// Swing High/Low Detection
+swing_length = 5
+swing_high = ta.pivothigh(high, swing_length, swing_length)
+swing_low = ta.pivotlow(low, swing_length, swing_length)
+
+// Higher Highs and Higher Lows (Uptrend)
+var float last_swing_high = na
+var float last_swing_low = na
+
+if not na(swing_high)
+    last_swing_high := swing_high
+if not na(swing_low)
+    last_swing_low := swing_low
+
+higher_high = not na(swing_high) and swing_high > last_swing_high[swing_length]
+higher_low = not na(swing_low) and swing_low > last_swing_low[swing_length]
+lower_high = not na(swing_high) and swing_high < last_swing_high[swing_length]
+lower_low = not na(swing_low) and swing_low < last_swing_low[swing_length]
+
+market_structure_bullish = higher_high or higher_low
+market_structure_bearish = lower_high or lower_low
+
+// === ENTRY CONDITIONS ===
+// Trend Alignment
+price_above_trend = close > trend_ma
+price_below_trend = close < trend_ma
+ma_bullish_cross = ta.crossover(signal_ma, trend_ma)
+ma_bearish_cross = ta.crossunder(signal_ma, trend_ma)
+
+// Momentum Confirmation
+rsi_bullish = rsi > 50 and rsi < rsi_overbought
+rsi_bearish = rsi < 50 and rsi > rsi_oversold
+macd_bullish = macd_line > signal_line and macd_hist > macd_hist[1]
+macd_bearish = macd_line < signal_line and macd_hist < macd_hist[1]
+
+// Volatility Filter
+volatility_filter = atr > ta.sma(atr, 20) * 0.8 // Only trade when volatility is decent
+
+// === ADVANCED ENTRY SIGNALS ===
+// Long Entry Conditions
+long_trend = price_above_trend and htf_trend_direction == 1
+long_momentum = rsi_bullish and macd_bullish
+long_structure = market_structure_bullish or (close > bb_basis and close[1] <= bb_lower)
+long_trigger = ma_bullish_cross or (ta.crossover(close, trend_ma) and rsi > 50)
+
+long_condition = long_trend and long_momentum and long_structure and long_trigger and valid_session and volatility_filter
+
+// Short Entry Conditions
+short_trend = price_below_trend and htf_trend_direction == -1
+short_momentum = rsi_bearish and macd_bearish
+short_structure = market_structure_bearish or (close < bb_basis and close[1] >= bb_upper)
+short_trigger = ma_bearish_cross or (ta.crossunder(close, trend_ma) and rsi < 50)
+
+short_condition = short_trend and short_momentum and short_structure and short_trigger and valid_session and volatility_filter
+
+// === POSITION SIZING ===
+// Calculate position size based on ATR and risk percentage
+risk_amount = strategy.equity * max_risk_per_trade / 100
+stop_distance = atr * atr_multiplier
+position_size = risk_amount / (stop_distance * syminfo.pointvalue)
+
+// === RISK MANAGEMENT ===
+var float long_stop_loss = na
+var float long_take_profit = na
+var float short_stop_loss = na
+var float short_take_profit = na
+
+if strategy.opentrades == 0
+    long_stop_loss := na
+    long_take_profit := na
+    short_stop_loss := na
+    short_take_profit := na
+
+// === ENTRY EXECUTION ===
+if long_condition and strategy.opentrades == 0
+    entry_price = close
+    long_stop_loss := entry_price - (atr * atr_multiplier)
+    long_take_profit := entry_price + (atr * atr_multiplier * take_profit_multiplier)
+    strategy.entry("Long", strategy.long, qty=position_size)
+    strategy.exit("Long Exit", "Long", stop=long_stop_loss, limit=long_take_profit)
+
+if short_condition and strategy.opentrades == 0
+    entry_price = close
+    short_stop_loss := entry_price + (atr * atr_multiplier)
+    short_take_profit := entry_price - (atr * atr_multiplier * take_profit_multiplier)
+    strategy.entry("Short", strategy.short, qty=position_size)
+    strategy.exit("Short Exit", "Short", stop=short_stop_loss, limit=short_take_profit)
+
+// === TRAILING STOP ===
+if strategy.position_size > 0 and not na(long_stop_loss)
+    profit_points = close - strategy.position_avg_price
+    if profit_points >= atr * trailing_stop_activation
+        new_stop = close - atr * atr_multiplier
+        if new_stop > long_stop_loss
+            long_stop_loss := new_stop
+            strategy.exit("Long Exit", "Long", stop=long_stop_loss, limit=long_take_profit)
+
+if strategy.position_size < 0 and not na(short_stop_loss)
+    profit_points = strategy.position_avg_price - close
+    if profit_points >= atr * trailing_stop_activation
+        new_stop = close + atr * atr_multiplier
+        if new_stop < short_stop_loss
+            short_stop_loss := new_stop
+            strategy.exit("Short Exit", "Short", stop=short_stop_loss, limit=short_take_profit)
+
+// === EMERGENCY EXIT CONDITIONS ===
+// Exit on opposing signals
+if strategy.position_size > 0 and short_condition
+    strategy.close("Long", comment="Opposing Signal")
+
+if strategy.position_size < 0 and long_condition
+    strategy.close("Short", comment="Opposing Signal")
+
+// === PLOTTING ===
+plot(trend_ma, color=color.blue, title="Trend MA", linewidth=2)
+plot(signal_ma, color=color.orange, title="Signal MA", linewidth=1)
+plot(bb_upper, color=color.gray, title="BB Upper")
+plot(bb_lower, color=color.gray, title="BB Lower")
+plot(bb_basis, color=color.gray, title="BB Basis", style=plot.style_line)
+
+// Plot entry signals
+plotshape(long_condition, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, title="Long Signal")
+plotshape(short_condition, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, title="Short Signal")
+
+// Plot stop losses and take profits
+plot(strategy.position_size > 0 ? long_stop_loss : na, color=color.red, style=plot.style_line, title="Long Stop Loss")
+plot(strategy.position_size > 0 ? long_take_profit : na, color=color.green, style=plot.style_line, title="Long Take Profit")
+plot(strategy.position_size < 0 ? short_stop_loss : na, color=color.red, style=plot.style_line, title="Short Stop Loss")
+plot(strategy.position_size < 0 ? short_take_profit : na, color=color.green, style=plot.style_line, title="Short Take Profit")
+
+// Background coloring for sessions
+bgcolor(is_london ? color.new(color.yellow, 95) : na, title="London Session")
+bgcolor(is_new_york ? color.new(color.blue, 95) : na, title="New York Session")
+bgcolor(is_tokyo ? color.new(color.red, 95) : na, title="Tokyo Session")
+
+// === PERFORMANCE TABLE ===
+if barstate.islast
+    var table performance_table = table.new(position.top_right, 2, 6, bgcolor=color.white, border_width=1)
+    table.cell(performance_table, 0, 0, "Metric", text_color=color.black, bgcolor=color.gray)
+    table.cell(performance_table, 1, 0, "Value", text_color=color.black, bgcolor=color.gray)
+    table.cell(performance_table, 0, 1, "Net Profit", text_color=color.black)
+    table.cell(performance_table, 1, 1, str.tostring(strategy.netprofit, "#.##") + " " + syminfo.currency, text_color=color.black)
+    table.cell(performance_table, 0, 2, "Win Rate", text_color=color.black)
+    table.cell(performance_table, 1, 2, str.tostring(strategy.wintrades / strategy.closedtrades * 100, "#.##") + "%", text_color=color.black)
+    table.cell(performance_table, 0, 3, "Profit Factor", text_color=color.black)
+    table.cell(performance_table, 1, 3, str.tostring(strategy.grossprofit / strategy.grossloss, "#.##"), text_color=color.black)
+    table.cell(performance_table, 0, 4, "Max Drawdown", text_color=color.black)
+    table.cell(performance_table, 1, 4, str.tostring(strategy.max_drawdown, "#.##") + " " + syminfo.currency, text_color=color.black)
+    table.cell(performance_table, 0, 5, "Total Trades", text_color=color.black)
+    table.cell(performance_table, 1, 5, str.tostring(strategy.closedtrades), text_color=color.black)

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>π - Premium Rideshare Platform</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#4F46E5" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Pi VIP" />
+    <meta name="application-name" content="Pi VIP Rideshare" />
+    <meta name="msapplication-TileColor" content="#4F46E5" />
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png" />
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- PWA Icons -->
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-192x192.png" />
+    <script src="/socket.io/socket.io.js"></script>
+    
+    <!-- Google Maps with Vector Support for Map Rotation -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYJnVS_4EdeLrxACl4W5eTOCQiwgYTk28&libraries=places,geometry,marker&v=beta&map_ids=DEMO_MAP_ID"></script>
+
+    <!-- Google Pay API -->
+    <script async defer src="https://pay.google.com/gp/p/js/pay.js"></script>
+
+    <!-- Apple Pay is built into Safari, no additional script needed -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+    
+    <!-- PWA Service Worker Registration - Disabled in development -->
+    <script>
+      // Service Worker disabled in development to prevent errors
+      console.log('Pi VIP PWA: Service Worker disabled in development mode');
+    </script>
+  </body>
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi VIP Rideshare - QR Codes for Soft Launch</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 50px;
+        }
+        
+        .header h1 {
+            font-size: 48px;
+            margin: 0;
+            font-weight: 700;
+        }
+        
+        .pi-symbol {
+            font-size: 64px;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            font-size: 18px;
+            opacity: 0.9;
+            margin-top: 10px;
+        }
+        
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .qr-card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .qr-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .qr-image {
+            width: 200px;
+            height: 200px;
+            margin: 0 auto 20px;
+            background: white;
+            border: 2px solid #f1f5f9;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .qr-image img {
+            width: 180px;
+            height: 180px;
+            border-radius: 10px;
+        }
+        
+        .qr-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 10px;
+        }
+        
+        .qr-description {
+            color: #64748b;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        
+        .download-btn {
+            background: #4F46E5;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .download-btn:hover {
+            background: #4338ca;
+            transform: translateY(-2px);
+        }
+        
+        .rider .download-btn { background: #3b82f6; }
+        .rider .download-btn:hover { background: #2563eb; }
+        
+        .driver .download-btn { background: #10b981; }
+        .driver .download-btn:hover { background: #059669; }
+        
+        .instructions {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-top: 30px;
+        }
+        
+        .instructions h3 {
+            color: #1e293b;
+            margin-top: 0;
+            font-size: 24px;
+        }
+        
+        .instructions ul {
+            color: #64748b;
+            line-height: 1.8;
+        }
+        
+        .instructions li {
+            margin-bottom: 8px;
+        }
+        
+        .footer {
+            text-align: center;
+            color: white;
+            margin-top: 40px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="pi-symbol">π</div>
+            <h1>Pi VIP Rideshare</h1>
+            <p class="subtitle">QR Codes for Soft Launch Distribution</p>
+        </div>
+        
+        <div class="qr-grid">
+            <!-- Main Platform QR -->
+            <div class="qr-card main">
+                <div class="qr-image">
+                    <img src="pi-vip-main-qr.png?v=2025-09-09" alt="Pi VIP Main Platform QR Code">
+                </div>
+                <div class="qr-title">📱 Main Platform</div>
+                <div class="qr-description">
+                    Scan to see app selector - users choose between Rider, Driver, or Admin access
+                </div>
+                <a href="pi-vip-main-qr.png" download="Pi-VIP-Main-Platform-QR.png" class="download-btn">
+                    Download QR Code
+                </a>
+            </div>
+            
+            <!-- Rider App QR -->
+            <div class="qr-card rider">
+                <div class="qr-image">
+                    <img src="pi-vip-rider-qr.png?v=2025-09-09" alt="Pi VIP Rider App QR Code">
+                </div>
+                <div class="qr-title">🚗 Rider App</div>
+                <div class="qr-description">
+                    Direct access to book rides - perfect for customer-facing materials and marketing
+                </div>
+                <a href="pi-vip-rider-qr.png" download="Pi-VIP-Rider-App-QR.png" class="download-btn">
+                    Download QR Code
+                </a>
+            </div>
+            
+            <!-- Driver App QR -->
+            <div class="qr-card driver">
+                <div class="qr-image">
+                    <img src="pi-vip-driver-qr.png?v=2025-09-09" alt="Pi VIP Driver App QR Code">
+                </div>
+                <div class="qr-title">🚙 Driver App</div>
+                <div class="qr-description">
+                    Direct driver onboarding and earnings tracking - ideal for driver recruitment campaigns
+                </div>
+                <a href="pi-vip-driver-qr.png" download="Pi-VIP-Driver-App-QR.png" class="download-btn">
+                    Download QR Code
+                </a>
+            </div>
+        </div>
+        
+        <div class="instructions">
+            <h3>🚀 How to Use These QR Codes for Your Soft Launch</h3>
+            <ul>
+                <li><strong>Print Marketing Materials:</strong> Add QR codes to flyers, business cards, posters</li>
+                <li><strong>Social Media Posts:</strong> Include QR codes in Instagram stories, Facebook posts, LinkedIn</li>
+                <li><strong>Email Campaigns:</strong> Embed in newsletters and email signatures</li>
+                <li><strong>Driver Recruitment:</strong> Use Driver App QR code for recruiting materials</li>
+                <li><strong>Customer Acquisition:</strong> Use Rider App QR code for customer-facing promotions</li>
+                <li><strong>General Marketing:</strong> Use Main Platform QR code when you want people to explore all options</li>
+                <li><strong>Business Cards:</strong> Include your QR code for instant app access</li>
+                <li><strong>Vehicle Decals:</strong> Place QR codes on ride vehicles for rider recruitment</li>
+            </ul>
+        </div>
+        
+        <div class="footer">
+            <p>🌟 Pi VIP Rideshare - Premium Transportation Platform</p>
+            <p>Ready for global distribution</p>
+        </div>
+    </div>
+</body>
+</html>
