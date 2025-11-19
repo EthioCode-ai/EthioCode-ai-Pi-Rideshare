@@ -64,7 +64,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { db, initializeDatabase } = require('./database');
-app.locals.db = db;  // ← ADD THIS LINE
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const slowDown = require('express-slow-down');
@@ -76,6 +75,7 @@ const path = require('path');
 const fs = require('fs').promises;
 
 const app = express();
+app.locals.db = db;  // ← ADD IT HERE INSTEAD
 
 // Configure trust proxy for rate limiting
 app.set('trust proxy', 1);
