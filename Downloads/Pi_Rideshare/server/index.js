@@ -64,6 +64,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { db, initializeDatabase } = require('./database');
+app.locals.db = db;  // ← ADD THIS LINE
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const slowDown = require('express-slow-down');
