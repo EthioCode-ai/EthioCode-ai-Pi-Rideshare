@@ -40,7 +40,7 @@ router.get('/performance/today/:driverId', async (req, res) => {
       SELECT 
         COUNT(*) as trip_count,
         COALESCE(SUM(final_fare), 0) as total_earnings,
-        COALESCE(SUM(distance), 0) as total_miles
+        COALESCE(SUM(distance_meters)/1609.34, 0) as total_miles
       FROM rides
       WHERE driver_id = $1
         AND status = 'completed'
@@ -245,7 +245,7 @@ router.get('/earnings/:driverId', async (req, res) => {
         COALESCE(SUM(CASE WHEN completed_at >= $3 THEN final_fare ELSE 0 END), 0) as week,
         COALESCE(SUM(CASE WHEN completed_at >= $4 THEN final_fare ELSE 0 END), 0) as month,
         COUNT(CASE WHEN completed_at >= $2 THEN 1 END) as trips_today,
-        COALESCE(SUM(CASE WHEN completed_at >= $2 THEN distance ELSE 0 END), 0) as miles
+        COALESCE(SUM(CASE WHEN completed_at >= $2 THEN distance_meters ELSE 0 END)1609.34, 0) as miles
       FROM rides
       WHERE driver_id = $1
         AND status = 'completed'
