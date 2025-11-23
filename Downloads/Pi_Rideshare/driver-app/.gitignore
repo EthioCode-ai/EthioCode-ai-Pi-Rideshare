@@ -72,3 +72,15 @@ coverage/
 *.swo
 *~
 .watchmanconfig
+
+# Windows cache files
+AppData/
+**/AppData/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
