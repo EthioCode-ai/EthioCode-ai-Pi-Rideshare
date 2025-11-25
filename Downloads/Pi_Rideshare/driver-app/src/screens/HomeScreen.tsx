@@ -12,6 +12,10 @@ import {
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import driverService from '../services/driver.service';
+import socketService from '../services/socket.service';
+import RideRequestModal, { RideRequestData } from '../components/RideRequestModal';
 
 // Performance data interface
 interface PerformanceData {
@@ -24,7 +28,20 @@ interface PerformanceData {
 
 // Ride state types
 type RideState = 'waiting' | 'pickingUp' | 'droppingOff';
+// ← INSERT HERE (line 28-32)
+/**
+ * Map Styles: Dynamic based on driver state
+ */
+const IDLE_MAP_STYLE = [
+  { "elementType": "geometry", "stylers": [{ "color": "#ebebeb" }] },
+  { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9d6df" }] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
+  { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#d4d4d4" }] },
+  { "elementType": "labels.text.fill", "stylers": [{ "color": "#6b6b6b" }] },
+  { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] }
+];
 
+const ACTIVE_MAP_STYLE = undefined;
 // ROTATION OFFSET: Adjust this if car appears sideways
 // 0 = no offset (car front points up in image = 0°/North)
 // -90 = rotate 90° counterclockwise
@@ -34,7 +51,11 @@ const CAR_ROTATION_OFFSET = 90;
 const HomeScreen: React.FC = () => {
   const [location, setLocation] = useState<any>(null);
   const [isOnline, setIsOnline] = useState(false);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [rideRequest, setRideRequest] = useState<RideRequestData | null>(null);
+  const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
   const [heading, setHeading] = useState<number>(0);
   const [performanceExpanded, setPerformanceExpanded] = useState(true);
   const [headerExpanded, setHeaderExpanded] = useState(false);
@@ -69,7 +90,21 @@ const HomeScreen: React.FC = () => {
       useNativeDriver: false,
     }).start();
   }, [headerExpanded]);
-
+    // Load user data from storage
+  useEffect(() => {
+  const loadUser = async () => {
+    try {
+      const userData = await AsyncStorage.getItem('@pi_rideshare:user_data');
+      if (userData) {
+        setUser(JSON.parse(userData));
+        console.log('👤 User loaded:', JSON.parse(userData));
+      }
+    } catch (error) {
+      console.error('❌ Failed to load user:', error);
+    }
+  };
+  loadUser();
+}, []); 
   useEffect(() => {
     // Alternating text animation when online and waiting
     if (isOnline && rideState === 'waiting') {
@@ -97,6 +132,45 @@ const HomeScreen: React.FC = () => {
       textOpacity.setValue(1);
     }
   }, [isOnline, rideState]);
+
+// Socket ride request listener
+useEffect(() => {
+  if (socketConnected && user?.id) {
+    console.log('🎧 Setting up ride request listener...');
+    
+    socketService.onNewRideRequest((request) => {
+      console.log('🚗 Ride request received!', request);
+      // Show the modal instead of Alert
+      setRideRequest({
+        rideId: request.rideId,
+        riderId: request.riderId,
+        riderName: request.riderName || 'Rider',
+        riderRating: 4.8,
+        pickup: {
+          address: request.pickup?.address || 'Pickup location',
+          lat: request.pickup?.latitude,
+          lng: request.pickup?.longitude,
+        },
+        destination: {
+          address: request.destination?.address || 'Destination',
+          lat: request.destination?.latitude,
+          lng: request.destination?.longitude,
+        },
+        estimatedFare: request.estimatedFare || 0,
+        estimatedDistance: request.estimatedDistance,
+        estimatedDuration: request.estimatedDuration,
+      });
+    });
+  }
+  
+  // Cleanup on unmount
+  return () => {
+    if (locationIntervalRef.current) {
+      clearInterval(locationIntervalRef.current);
+      locationIntervalRef.current = null;
+    }
+  };
+}, [socketConnected, user?.id]);
 
   // Fetch performance data from backend
   const fetchPerformanceData = async () => {
@@ -204,15 +278,45 @@ const HomeScreen: React.FC = () => {
     }
   };
 
-  const toggleOnlineStatus = () => {
-    const newStatus = !isOnline;
-    setIsOnline(newStatus);
-    setHeaderExpanded(false);
-
-    if (newStatus) {
-      Alert.alert('Online', 'You are now online and ready to accept rides!');
+const toggleOnlineStatus = async () => {
+  if (!isOnline) {
+    // GOING ONLINE
+    try {
+      // 1. Connect socket if not connected
+      if (!socketService.connected) {
+        console.log('🔌 Connecting socket...');
+        await socketService.connect(user?.id || '');
+        setSocketConnected(true);
+      }
+      
+      // 2. Emit driver-connect
+      socketService.driverConnect({
+        driverId: user?.id || '',
+        location: {
+          lat: location.latitude,
+          lng: location.longitude,
+        },
+      });
+      
+      // 3. Start location broadcast interval (every 5 seconds)
+      locationIntervalRef.current = setInterval(() => {
+        if (location) {
+          socketService.sendLocationUpdate({
+            driverId: user?.id || '',
+            latitude: location.latitude,
+            longitude: location.longitude,
+            heading: heading,
+            speed: 0,
+          });
+        }
+      }, 5000);
+      
+      // 4. Update UI
+      setIsOnline(true);
+      setHeaderExpanded(false);
       setRideState('waiting');
-     
+      
+      // 5. Animate camera
       if (mapRef.current && location) {
         mapRef.current.animateCamera({
           center: {
@@ -224,24 +328,65 @@ const HomeScreen: React.FC = () => {
           zoom: 17,
         }, { duration: 1000 });
       }
-    } else {
-      Alert.alert('Offline', 'You are now offline');
-      setRideState('waiting');
-      setRiderName(null);
-     
-      if (mapRef.current && location) {
-        mapRef.current.animateCamera({
-          center: {
-            latitude: location.latitude,
-            longitude: location.longitude,
-          },
-          heading: 0,
-          pitch: 0,
-          zoom: 15,
-        }, { duration: 1000 });
-      }
+      
+      Alert.alert('Online', 'You are now online and ready to accept rides!');
+      
+    } catch (error) {
+      console.error('❌ Failed to go online:', error);
+      Alert.alert('Error', 'Failed to go online. Please try again.');
     }
-  };
+    
+  } else {
+    // GOING OFFLINE
+    
+    // 1. Stop location broadcasts
+    if (locationIntervalRef.current) {
+      clearInterval(locationIntervalRef.current);
+      locationIntervalRef.current = null;
+    }
+    
+    // 2. Emit offline status
+    if (socketService.connected) {
+      socketService.driverDisconnect(user?.id || '');
+    }
+    
+    // 3. Update UI
+    setIsOnline(false);
+    setRideState('waiting');
+    setRiderName(null);
+    
+    // 4. Reset camera
+    if (mapRef.current && location) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+        },
+        heading: 0,
+        pitch: 0,
+        zoom: 15,
+      }, { duration: 1000 });
+    }
+    
+    Alert.alert('Offline', 'You are now offline');
+  }
+};
+
+// Handle ride request accept
+const handleAcceptRide = (rideId: string) => {
+  console.log('✅ Accepting ride:', rideId);
+  socketService.acceptRide(user?.id || '', rideId);
+  setRideRequest(null);
+  // TODO: Navigate to ActiveRideScreen (Phase 2.5)
+  Alert.alert('Ride Accepted', 'Navigate to pickup location!');
+};
+
+// Handle ride request decline
+const handleDeclineRide = (rideId: string) => {
+  console.log('❌ Declining ride:', rideId);
+  socketService.rejectRide(user?.id || '', rideId);
+  setRideRequest(null);
+};
 
   const centerOnUserLocation = async () => {
     try {
@@ -322,13 +467,21 @@ const HomeScreen: React.FC = () => {
     );
   }
 
-  return (
+  return (<>
     <TouchableWithoutFeedback onPress={() => headerExpanded && setHeaderExpanded(false)}>
       <View style={styles.container}>
         <MapView
           ref={mapRef}
           provider={PROVIDER_GOOGLE}
           style={styles.map}
+          customMapStyle={[
+            { "elementType": "geometry", "stylers": [{ "color": "#ebebeb" }] },
+            { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9d6df" }] },
+            { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
+            { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#d4d4d4" }] },
+            { "elementType": "labels.text.fill", "stylers": [{ "color": "#6b6b6b" }] },
+            { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] }
+           ]}
           initialRegion={{
             latitude: location.latitude,
             longitude: location.longitude,
@@ -339,6 +492,9 @@ const HomeScreen: React.FC = () => {
           showsMyLocationButton={false}
           showsCompass={true}
           showsTraffic={true}
+          zoomEnabled={true}           // ← ADD THIS
+          scrollEnabled={true}          // ← ADD THIS
+          zoomControlEnabled={true}     // ← ADD THIS (Android only)
           rotateEnabled={true}
           pitchEnabled={true}
           toolbarEnabled={false}
@@ -351,7 +507,7 @@ const HomeScreen: React.FC = () => {
     latitude: location.latitude,
     longitude: location.longitude,
   }}
-  anchor={{ x: 0.5, y: 0.85 }}
+  anchor={{ x: 0.5, y: 0.5 }}
   flat={false}  // 👈 Changed to false!
   rotation={heading + CAR_ROTATION_OFFSET}
 >
@@ -491,6 +647,36 @@ const HomeScreen: React.FC = () => {
           <TouchableOpacity style={[styles.floatingButton, styles.floatingButtonPrimary]}>
             <Text style={styles.floatingButtonText}>💬</Text>
           </TouchableOpacity>
+        {/* TEST BUTTON - Remove before production */}
+  {isOnline && (
+    <TouchableOpacity 
+      style={[styles.floatingButton, { backgroundColor: '#F59E0B' }]}
+      onPress={() => {
+        setRideRequest({
+          rideId: 'test-' + Date.now(),
+          riderId: 'test-rider',
+          riderName: 'Tolbert Dunkin',
+          riderRating: 4.8,
+          pickup: {
+            address: '3804 SW High Point Ave, Bentonville, AR',
+            lat: 36.36878,
+            lng: -94.25403,
+          },
+          destination: {
+            address: 'XNA Airport, Bentonville, AR',
+            lat: 36.28078,
+            lng: -94.30452,
+          },
+          estimatedFare: 25.50,
+          estimatedDistance: 12.5,
+          estimatedDuration: 18,
+          surgeMultiplier: 1.2,
+        });
+      }}
+    >
+      <Text style={styles.floatingButtonText}>🧪</Text>
+    </TouchableOpacity>
+  )}  
         </View>
 
         {/* Bottom Banner - Dynamic based on driver status */}
@@ -522,8 +708,19 @@ const HomeScreen: React.FC = () => {
           )}
         </View>
       </View>
-    </TouchableWithoutFeedback>
-  );
+      
+   </TouchableWithoutFeedback>
+
+  {/* Ride Request Modal */}
+  <RideRequestModal
+    visible={rideRequest !== null}
+    request={rideRequest}
+    driverLocation={location}
+    onAccept={handleAcceptRide}
+    onDecline={handleDeclineRide}
+  />
+</>
+);
 };
 
 const styles = StyleSheet.create({

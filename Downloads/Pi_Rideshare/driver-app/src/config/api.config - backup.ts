@@ -173,21 +173,15 @@ export const SOCKET_EVENTS = {
   driver: {
     // Listen (incoming from server)
     NEW_RIDE_REQUEST: 'new-ride-request',
-    RIDE_ACCEPTED: 'cascading-ride-accepted',
-    RIDE_REJECTED: 'cascading-ride-rejected',
-    RIDE_CANCELLED: 'ride-cancelled',
-    RIDE_EXPIRED: 'ride-request-expired',
+    RIDE_ACCEPTED: 'ride-accepted',
     RIDE_STATUS_CHANGED: 'ride-status-changed',
     CORPORATE_VERIFICATION: 'corporate-badge-verification',
-    DRIVER_AVAILABILITY_UPDATE: 'driver-availability-update',
     
     // Emit (outgoing to server)
-    DRIVER_CONNECT: 'driver-connect',
     UPDATE_LOCATION: 'driver-location-update',
-    ACCEPT_RIDE: 'accept-cascading-ride',
-    REJECT_RIDE: 'reject-cascading-ride',
-    DRIVER_ARRIVED: 'driver-arrived',
-    UPDATE_TRIP_STATUS: 'trip-status',
+    UPDATE_AVAILABILITY: 'driver-availability-update',
+    ACCEPT_RIDE: 'accept-ride',
+    UPDATE_TRIP_STATUS: 'update-trip-status',
   },
   rider: {
     // Listen (incoming from server)
@@ -215,7 +209,7 @@ export const SOCKET_EVENTS = {
 
 export const SOCKET_CONFIG = {
   url: API_BASE_URL,
-  namespace: '', // '/driver', '/rider', or '/admin'
+  namespace: `/${APP_ROLE}`, // '/driver', '/rider', or '/admin'
   events: SOCKET_EVENTS[APP_ROLE],
   options: {
     transports: ['websocket'],

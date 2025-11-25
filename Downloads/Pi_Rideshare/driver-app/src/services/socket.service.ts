@@ -13,7 +13,7 @@
  */
 
 import { io, Socket } from 'socket.io-client';
-import { SOCKET_CONFIG, SOCKET_EVENTS, DEBUG_MODE } from '../config/api.config';
+import { SOCKET_CONFIG, DEBUG_MODE } from '../config/api.config';
 import apiService from './api.service';
 
 /**
@@ -169,7 +169,7 @@ class SocketService {
       return;
     }
 
-    const event = SOCKET_EVENTS.NEW_RIDE_REQUEST;
+    const event = SOCKET_CONFIG.events.NEW_RIDE_REQUEST;
     
     this.socket.on(event, (data: RideRequest) => {
       console.log('🚗 New ride request received:', data.rideId);
@@ -194,7 +194,7 @@ class SocketService {
       return;
     }
 
-    const event = SOCKET_EVENTS.RIDE_STATUS_CHANGED;
+    const event = SOCKET_CONFIG.events.RIDE_STATUS_CHANGED;
     
     this.socket.on(event, (data: any) => {
       console.log('🔄 Ride status changed:', data);
@@ -218,7 +218,7 @@ class SocketService {
       return;
     }
 
-    const event = SOCKET_EVENTS.CORPORATE_VERIFICATION;
+    const event = SOCKET_CONFIG.events.CORPORATE_VERIFICATION;
     
     this.socket.on(event, (data: any) => {
       console.log('📋 Corporate verification requested:', data);
@@ -238,47 +238,86 @@ class SocketService {
    * 
    * @param location - GPS coordinates and heading
    */
-  sendLocationUpdate(location: {
-    driverId: string;
-    latitude: number;
-    longitude: number;
-    heading?: number;
-    speed?: number;
-  }): void {
-    if (!this.socket || !this.isConnected) {
-      console.warn('⚠️ Cannot send location: socket not connected');
-      return;
-    }
+sendLocationUpdate(location: {
+  driverId: string;
+  latitude: number;
+  longitude: number;
+  heading?: number;
+  speed?: number;
+}): void {
+  if (!this.socket || !this.isConnected) {
+    return; // Silent fail for location updates
+  }
 
-    this.socket.emit(SOCKET_EVENTS.UPDATE_LOCATION, location);
+  this.socket.emit(SOCKET_CONFIG.events.UPDATE_LOCATION, {
+    driverId: location.driverId,
+    location: {
+      lat: location.latitude,
+      lng: location.longitude,
+    },
+    heading: location.heading || 0,
+    speed: location.speed || 0,
+    timestamp: new Date().toISOString(),
+  });
+}
 
+ 
     // Don't log every location update (too noisy)
     // if (DEBUG_MODE) {
     //   console.log('📍 Location sent:', location);
     // }
+  
+
+/**
+ * Driver Goes Online
+ * 
+ * Emits driver-connect with full payload required by backend
+ * 
+ * @param data - Driver ID, location, and optional vehicle info
+ */
+driverConnect(data: {
+  driverId: string;
+  location: { lat: number; lng: number };
+  vehicle?: any;
+}): void {
+  if (!this.socket || !this.isConnected) {
+    console.warn('⚠️ Cannot go online: socket not connected');
+    return;
   }
 
-  /**
-   * Update Driver Availability
-   * 
-   * Notifies backend when driver goes online/offline
-   * 
-   * @param isOnline - Online status
-   */
-  updateAvailability(driverId: string, isOnline: boolean): void {
-    if (!this.socket || !this.isConnected) {
-      console.warn('⚠️ Cannot update availability: socket not connected');
-      return;
-    }
+  console.log('🟢 Driver going ONLINE');
 
-    console.log(`🔄 Updating availability: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+  this.socket.emit(SOCKET_CONFIG.events.DRIVER_CONNECT, {
+    driverId: data.driverId,
+    status: 'online',
+    isAvailable: true,
+    location: data.location,
+    vehicle: data.vehicle || null,
+    timestamp: new Date().toISOString(),
+  });
+}
 
-    this.socket.emit(SOCKET_EVENTS.UPDATE_AVAILABILITY, {
-      driverId,
-      isOnline,
-      timestamp: new Date().toISOString(),
-    });
+/**
+ * Driver Goes Offline
+ * 
+ * @param driverId - Driver's user ID
+ */
+driverDisconnect(driverId: string): void {
+  if (!this.socket || !this.isConnected) {
+    console.warn('⚠️ Cannot go offline: socket not connected');
+    return;
   }
+
+  console.log('🔴 Driver going OFFLINE');
+
+  this.socket.emit(SOCKET_CONFIG.events.DRIVER_CONNECT, {
+    driverId,
+    status: 'offline',
+    isAvailable: false,
+    location: null,
+    timestamp: new Date().toISOString(),
+  });
+}
 
   /**
    * Accept Ride Request
@@ -295,13 +334,32 @@ class SocketService {
 
     console.log('✅ Accepting ride via socket:', rideId);
 
-    this.socket.emit(SOCKET_EVENTS.ACCEPT_RIDE, {
+    this.socket.emit(SOCKET_CONFIG.events.ACCEPT_RIDE, {
       driverId,
       rideId,
       timestamp: new Date().toISOString(),
     });
   }
+/**
+ * Reject/Decline Ride Request
+ * 
+ * @param driverId - Driver's user ID
+ * @param rideId - Ride request ID
+ */
+rejectRide(driverId: string, rideId: string): void {
+  if (!this.socket || !this.isConnected) {
+    console.warn('⚠️ Cannot reject ride: socket not connected');
+    return;
+  }
 
+  console.log('❌ Rejecting ride:', rideId);
+
+  this.socket.emit(SOCKET_CONFIG.events.REJECT_RIDE, {
+    driverId,
+    rideId,
+    timestamp: new Date().toISOString(),
+  });
+}
   /**
    * Update Trip Status
    * 
@@ -321,7 +379,7 @@ class SocketService {
 
     console.log(`🔄 Updating trip status via socket: ${status}`);
 
-    this.socket.emit(SOCKET_EVENTS.UPDATE_TRIP_STATUS, {
+    this.socket.emit(SOCKET_CONFIG.events.UPDATE_TRIP_STATUS, {
       rideId,
       status,
       timestamp: new Date().toISOString(),
@@ -374,4 +432,4 @@ class SocketService {
 const socketService = new SocketService();
 
 export default socketService;
-export { RideRequest, SocketService };
+export { SocketService };

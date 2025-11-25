@@ -62,7 +62,13 @@ apiClient.interceptors.request.use(
         console.log('🌐 API Request:', {
           method: config.method?.toUpperCase(),
           url: config.url,
+          baseURL: config.baseURL,
+          fullURL: `${config.baseURL}${config.url}`,
           hasToken: !!token,
+          headers: config.headers,
+          data: config.data, // 🔥 CRITICAL: Now logging request body!
+          dataType: typeof config.data,
+          dataStringified: JSON.stringify(config.data),
         });
       }
 
@@ -90,6 +96,7 @@ apiClient.interceptors.response.use(
         url: response.config.url,
         status: response.status,
         data: response.data,
+        requestData: response.config.data, // 🔥 Log what was sent
       });
     }
     return response;
@@ -105,7 +112,9 @@ apiClient.interceptors.response.use(
         console.error('❌ API Error Response:', {
           url: error.config?.url,
           status,
-          data,
+          responseData: data,
+          requestData: error.config?.data, // 🔥 CRITICAL: Log what was sent!
+          requestHeaders: error.config?.headers,
         });
       }
 
@@ -174,6 +183,16 @@ const apiService = {
    * POST request
    */
   post: async <T = any>(url: string, data?: any): Promise<T> => {
+    // 🔥 DEFENSIVE: Explicitly log before sending
+    if (DEBUG_MODE) {
+      console.log('📤 POST Method Called:', {
+        url,
+        data,
+        dataType: typeof data,
+        dataKeys: data ? Object.keys(data) : [],
+      });
+    }
+    
     const response = await apiClient.post<T>(url, data);
     return response.data;
   },
