@@ -328,5 +328,45 @@ router.get('/drivers/availability', async (req, res) => {
     res.status(500).json({ error: 'Failed to get driver availability' });
   }
 });
+// Calculate route with Google Directions API
+router.post('/calculate-route', async (req, res) => {
+  try {
+    const { origin, destination } = req.body;
+    
+    if (!origin || !destination) {
+      return res.status(400).json({ error: 'Origin and destination are required' });
+    }
+
+    // Import Google Maps client if not already imported
+    const { Client } = require('@googlemaps/google-maps-services-js');
+    const googleMapsClient = new Client({});
+
+    const response = await googleMapsClient.directions({
+      params: {
+        origin: `${origin.lat},${origin.lng}`,
+        destination: `${destination.lat},${destination.lng}`,
+        mode: 'driving',
+        departure_time: 'now',
+        key: process.env.GOOGLE_MAPS_API_KEY,
+      },
+    });
+
+    if (!response.data.routes || response.data.routes.length === 0) {
+      return res.status(404).json({ error: 'No route found' });
+    }
+
+    const route = response.data.routes[0];
+    const leg = route.legs[0];
+
+    res.json({
+      distance: leg.distance.value / 1609.34, // meters to miles
+      duration: Math.round(leg.duration.value / 60), // seconds to minutes
+      polyline: route.overview_polyline.points,
+    });
+  } catch (error) {
+    console.error('Route calculation error:', error);
+    res.status(500).json({ error: 'Failed to calculate route' });
+  }
+});
 
 module.exports = router;
