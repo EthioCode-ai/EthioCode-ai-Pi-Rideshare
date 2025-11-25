@@ -329,43 +329,155 @@ router.get('/drivers/availability', async (req, res) => {
   }
 });
 // Calculate route with Google Directions API
-router.post('/calculate-route', async (req, res) => {
+router.post('/routes/calculate', async (req, res) => {
   try {
-    const { origin, destination } = req.body;
+    const { driverLocation, pickup, destination } = req.body;
     
-    if (!origin || !destination) {
-      return res.status(400).json({ error: 'Origin and destination are required' });
+    // Validate inputs
+    if (!driverLocation?.lat || !driverLocation?.lng) {
+      return res.status(400).json({ error: 'Driver location required' });
+    }
+    if (!pickup?.lat || !pickup?.lng) {
+      return res.status(400).json({ error: 'Pickup location required' });
+    }
+    if (!destination?.lat || !destination?.lng) {
+      return res.status(400).json({ error: 'Destination location required' });
     }
 
-    // Import Google Maps client if not already imported
     const { Client } = require('@googlemaps/google-maps-services-js');
     const googleMapsClient = new Client({});
 
-    const response = await googleMapsClient.directions({
-      params: {
-        origin: `${origin.lat},${origin.lng}`,
-        destination: `${destination.lat},${destination.lng}`,
-        mode: 'driving',
-        departure_time: 'now',
-        key: process.env.GOOGLE_MAPS_API_KEY,
-      },
-    });
+    // Haversine fallback function
+    const haversineDistance = (lat1, lon1, lat2, lon2) => {
+      const R = 6371; // Earth's radius in km
+      const dLat = (lat2 - lat1) * (Math.PI / 180);
+      const dLon = (lon2 - lon1) * (Math.PI / 180);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * (Math.PI / 180)) *
+          Math.cos(lat2 * (Math.PI / 180)) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
 
-    if (!response.data.routes || response.data.routes.length === 0) {
-      return res.status(404).json({ error: 'No route found' });
+    const haversineFallback = (fromLat, fromLng, toLat, toLng) => {
+      const distanceKm = haversineDistance(fromLat, fromLng, toLat, toLng);
+      const distanceMiles = distanceKm * 0.621371;
+      // Estimate: 30 km/h average speed in city
+      const durationMinutes = Math.round((distanceKm / 30) * 60);
+      return {
+        distance: { km: parseFloat(distanceKm.toFixed(2)), miles: parseFloat(distanceMiles.toFixed(2)) },
+        duration: { minutes: durationMinutes, seconds: durationMinutes * 60 },
+        source: 'fallback'
+      };
+    };
+
+    let toPickup, toDestination;
+    let usesFallback = false;
+
+    try {
+      // Call 1: Driver → Pickup
+      const route1 = await googleMapsClient.directions({
+        params: {
+          origin: `${driverLocation.lat},${driverLocation.lng}`,
+          destination: `${pickup.lat},${pickup.lng}`,
+          mode: 'driving',
+          departure_time: 'now',
+          key: process.env.GOOGLE_MAPS_API_KEY,
+        },
+      });
+
+      // Call 2: Pickup → Destination
+      const route2 = await googleMapsClient.directions({
+        params: {
+          origin: `${pickup.lat},${pickup.lng}`,
+          destination: `${destination.lat},${destination.lng}`,
+          mode: 'driving',
+          departure_time: 'now',
+          key: process.env.GOOGLE_MAPS_API_KEY,
+        },
+      });
+
+      if (!route1.data.routes?.length || !route2.data.routes?.length) {
+        throw new Error('No routes found');
+      }
+
+      const leg1 = route1.data.routes[0].legs[0];
+      const leg2 = route2.data.routes[0].legs[0];
+
+      toPickup = {
+        distance: {
+          km: parseFloat((leg1.distance.value / 1000).toFixed(2)),
+          miles: parseFloat((leg1.distance.value / 1609.34).toFixed(2)),
+        },
+        duration: {
+          minutes: Math.round(leg1.duration.value / 60),
+          seconds: leg1.duration.value,
+        },
+        source: 'google_maps',
+      };
+
+      toDestination = {
+        distance: {
+          km: parseFloat((leg2.distance.value / 1000).toFixed(2)),
+          miles: parseFloat((leg2.distance.value / 1609.34).toFixed(2)),
+        },
+        duration: {
+          minutes: Math.round(leg2.duration.value / 60),
+          seconds: leg2.duration.value,
+        },
+        source: 'google_maps',
+      };
+
+    } catch (googleError) {
+      console.error('Google Maps API error, using fallback:', googleError.message);
+      usesFallback = true;
+
+      // Fallback calculations
+      toPickup = haversineFallback(
+        driverLocation.lat,
+        driverLocation.lng,
+        pickup.lat,
+        pickup.lng
+      );
+
+      toDestination = haversineFallback(
+        pickup.lat,
+        pickup.lng,
+        destination.lat,
+        destination.lng
+      );
     }
 
-    const route = response.data.routes[0];
-    const leg = route.legs[0];
+    // Calculate totals
+    const totalTrip = {
+      distance: {
+        km: parseFloat((toPickup.distance.km + toDestination.distance.km).toFixed(2)),
+        miles: parseFloat((toPickup.distance.miles + toDestination.distance.miles).toFixed(2)),
+      },
+      duration: {
+        minutes: toPickup.duration.minutes + toDestination.duration.minutes,
+        seconds: toPickup.duration.seconds + toDestination.duration.seconds,
+      },
+    };
 
     res.json({
-      distance: leg.distance.value / 1609.34, // meters to miles
-      duration: Math.round(leg.duration.value / 60), // seconds to minutes
-      polyline: route.overview_polyline.points,
+      success: true,
+      toPickup,
+      toDestination,
+      totalTrip,
+      timestamp: new Date().toISOString(),
     });
+
   } catch (error) {
     console.error('Route calculation error:', error);
-    res.status(500).json({ error: 'Failed to calculate route' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to calculate routes',
+      message: error.message 
+    });
   }
 });
 
