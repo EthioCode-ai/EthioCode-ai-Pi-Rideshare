@@ -4302,7 +4302,7 @@ async function calculateSurgeMultiplier(pickupLat, pickupLng) {
       surgeFactors.push(`${timeLabel} Demand (+${Math.round((organicDemandFactor - 1) * 100)}%)`);
       console.log(`⏰ Organic demand surge applied: ${organicDemandFactor}x for ${timeLabel}`);
     }
-    
+
     // 7. CAP SURGE PRICING using config
     const maxSurgeMultiplier = config.max_surge_multiplier || 3.0;
     const finalMultiplier = Math.min(baseMultiplier, maxSurgeMultiplier);
@@ -5061,6 +5061,53 @@ app.post('/api/routes/calculate', authenticateToken, async (req, res) => {
     );
     
     // Determine traffic level description
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2.6: Airport Zone Detection
+    // ═══════════════════════════════════════════════════════════════════
+    
+    // Check if pickup is at an airport
+    let pickupAirportInfo = null;
+    const nearbyPickupAirport = getNearbyAirport(pickup.lat, pickup.lng);
+    if (nearbyPickupAirport) {
+      const airportCode = nearbyPickupAirport.code;
+      const pickupZone = findNearestAirportZone(pickup.lat, pickup.lng, airportCode, 'pickup');
+      pickupAirportInfo = {
+        isAirport: true,
+        airportName: nearbyPickupAirport.name,
+        airportCode: airportCode,
+        distanceToAirport: nearbyPickupAirport.distance,
+        zone: pickupZone ? {
+          name: pickupZone.name,
+          distanceMeters: pickupZone.distance,
+          fareMultiplier: pickupZone.fareMultiplier || 1.0
+        } : null,
+        queueInfo: {
+          queueLength: (airportDriverQueues.get(nearbyPickupAirport.name) || []).length,
+          estimatedWaitMinutes: Math.max(5, (airportDriverQueues.get(nearbyPickupAirport.name) || []).length * 8)
+        }
+      };
+      console.log(`✈️ Pickup at airport: ${airportCode} - ${pickupZone?.name || 'General area'}`);
+    }
+    
+    // Check if destination is at an airport
+    let destinationAirportInfo = null;
+    const nearbyDestAirport = getNearbyAirport(destination.lat, destination.lng);
+    if (nearbyDestAirport) {
+      const airportCode = nearbyDestAirport.code;
+      const dropoffZone = findNearestAirportZone(destination.lat, destination.lng, airportCode, 'dropoff');
+      destinationAirportInfo = {
+        isAirport: true,
+        airportName: nearbyDestAirport.name,
+        airportCode: airportCode,
+        distanceToAirport: nearbyDestAirport.distance,
+        zone: dropoffZone ? {
+          name: dropoffZone.name,
+          distanceMeters: dropoffZone.distance,
+          fareMultiplier: dropoffZone.fareMultiplier || 1.0
+        } : null
+      };
+      console.log(`✈️ Destination at airport: ${airportCode} - ${dropoffZone?.name || 'General area'}`);
+    }
     let trafficLevel = 'light';
     if (trafficMultiplier >= 1.5) trafficLevel = 'heavy';
     else if (trafficMultiplier >= 1.2) trafficLevel = 'moderate';
@@ -5158,6 +5205,12 @@ app.post('/api/routes/calculate', authenticateToken, async (req, res) => {
         radius_meters: GEOFENCE_RADIUS_METERS,
         pickup: { lat: pickup.lat, lng: pickup.lng },
         dropoff: { lat: destination.lat, lng: destination.lng }
+      },
+      airports: {
+        pickupIsAirport: !!pickupAirportInfo,
+        destinationIsAirport: !!destinationAirportInfo,
+        pickup: pickupAirportInfo,
+        destination: destinationAirportInfo
       },
       timestamp: now.toISOString()
     };

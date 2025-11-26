@@ -1,0 +1,65 @@
+{
+  "expo": {
+    "name": "Pi VIP Driver",
+    "slug": "pi-vip-driver",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pivip.driver",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "We need your location to show available rides nearby and help riders find you.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location even when the app is in background to track active rides.",
+        "NSCameraUsageDescription": "We need camera access to upload your documents for verification."
+      }
+    },
+    "android": {
+      "package": "com.pivip.driver",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCYJnVS_4EdeLrxACl4W5eTOCQiwgYTk28"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Pi VIP Driver to use your location for ride tracking."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1a1f6fc1-4393-47c4-b651-e9a50aa37ade"
+      }
+    }
+  }
+}

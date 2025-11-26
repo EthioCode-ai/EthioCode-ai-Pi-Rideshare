@@ -1,6 +1,12 @@
 /**
  * RootNavigator - Main app navigation with authentication state management
  * Phase 2.3 Implementation
+ * 
+ * Handles:
+ * - Auth state checking on app startup
+ * - Conditional rendering (Auth vs Main app)
+ * - Token validation
+ * - Navigation between auth and authenticated states
  */
 
 import React, { useState, useEffect } from 'react';
@@ -8,16 +14,15 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthStack from './AuthStack';
-import HomeScreen from '../screens/HomeScreen';
+import HomeScreen from '../screens/HomeScreen'; // Your existing HomeScreen
 import { StorageKeys } from '../constants/StorageKeys';
-//import ActiveRideScreen from '../screens/ActiveRideScreen';  // DELETE THIS
-//import { ActiveRide } from '../types/ride.types';  // DELETE THIS (duplicate)
 
+// Temporary simple navigator for HomeScreen until you implement full MainApp navigator
 import { createStackNavigator } from '@react-navigation/stack';
 
 export type MainStackParamList = {
   Home: undefined;
-//  ActiveRide: { ride: ActiveRide };
+  // Add other authenticated screens here later
 };
 
 const MainStack = createStackNavigator<MainStackParamList>();
@@ -30,7 +35,7 @@ function MainAppNavigator() {
       }}
     >
       <MainStack.Screen name="Home" component={HomeScreen} />
-          </MainStack.Navigator>
+    </MainStack.Navigator>
   );
 }
 
@@ -42,6 +47,7 @@ export default function RootNavigator() {
     console.log('🚀 RootNavigator mounted');
     checkAuthStatus();
 
+    // Listen for authentication changes every 2 seconds
     const authCheckInterval = setInterval(checkAuthStatus, 2000);
 
     return () => clearInterval(authCheckInterval);
@@ -54,9 +60,11 @@ export default function RootNavigator() {
       console.log('🔑 Token:', token ? 'EXISTS' : 'NONE');
       
       if (token) {
+        // Token exists - user is authenticated
         setIsAuthenticated(true);
         console.log('✅ User is authenticated');
       } else {
+        // No token - user needs to login
         setIsAuthenticated(false);
         console.log('❌ User NOT authenticated - showing LoginScreen');
       }
@@ -71,6 +79,7 @@ export default function RootNavigator() {
 
   console.log('📊 RootNavigator State:', { isLoading, isAuthenticated });
 
+  // Show loading screen while checking auth status
   if (isLoading) {
     console.log('⏳ Showing loading screen');
     return (
