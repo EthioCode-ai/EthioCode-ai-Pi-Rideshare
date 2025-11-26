@@ -71,6 +71,13 @@ const googleAuthRoutes = require('./google-auth'); // Added for Google OAuth rou
 const chatRoutes = require('./chatbot/chat-routes'); // AI Customer Support Chatbot
 const Stripe = require('stripe');
 const multer = require('multer');
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 2.6: Route & Surge Enhancement Constants
+// ═══════════════════════════════════════════════════════════════════
+const GEOFENCE_RADIUS_METERS = 100;    // Pickup AND dropoff arrival detection
+const GRACE_PERIOD_SECONDS = 120;       // 2 min free wait time
+const WAIT_RATE_PER_MINUTE = 0.35;      // After grace period
+const MAX_SURGE_MULTIPLIER = 3.0;       // Surge cap
 const path = require('path');
 const fs = require('fs').promises;
 
@@ -3795,6 +3802,259 @@ async function calculateDrivingDistance(pickup, destination) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 2.6: Weather, Traffic & Route Enhancement Helper Functions
+// ═══════════════════════════════════════════════════════════════════
+
+// 1. Fetch weather data from OpenWeather API
+async function getWeatherData(lat, lng) {
+  try {
+    const apiKey = process.env.OPENWEATHER_API_KEY;
+    if (!apiKey) {
+      console.log('⚠️ OPENWEATHER_API_KEY not configured, using defaults');
+      return { condition: 'Clear', temp: 70, description: 'clear sky' };
+    }
+    
+    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lng}&appid=${apiKey}&units=imperial`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.warn('⚠️ Weather API returned error, using defaults');
+      return { condition: 'Clear', temp: 70, description: 'clear sky' };
+    }
+    
+    const data = await response.json();
+    const condition = data.weather?.[0]?.main || 'Clear';
+    const temp = Math.round(data.main?.temp || 70);
+    const description = data.weather?.[0]?.description || 'clear sky';
+    
+    console.log(`🌤️ Weather at (${lat}, ${lng}): ${condition}, ${temp}°F - ${description}`);
+    return { condition, temp, description };
+  } catch (error) {
+    console.error('❌ Weather API error:', error.message);
+    return { condition: 'Clear', temp: 70, description: 'clear sky' };
+  }
+}
+
+// 2. Get traffic multiplier based on time of day
+function getTrafficMultiplierEnhanced(hour, dayOfWeek) {
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  
+  if (isWeekday) {
+    // Morning rush: 7-10am
+    if (hour >= 7 && hour < 10) return 1.5;
+    // Evening rush: 4-6:30pm
+    if (hour >= 16 && hour < 19) return 1.5;
+    // Daytime: 10am-4pm
+    if (hour >= 10 && hour < 16) return 1.2;
+  }
+  
+  // Off-peak (nights, weekends)
+  return 1.0;
+}
+
+// 3. Get weather ETA multiplier (driving speed impact)
+function getWeatherETAMultiplier(condition) {
+  const multipliers = {
+    'Clear': 1.0,
+    'Clouds': 1.0,
+    'Mist': 1.1,
+    'Fog': 1.3,
+    'Rain': 1.5,
+    'Drizzle': 1.3,
+    'Thunderstorm': 1.8,
+    'Snow': 2.0,
+    'Sleet': 1.8
+  };
+  return multipliers[condition] || 1.0;
+}
+
+// 4. Get weather delay in minutes (added buffer)
+function getWeatherDelayMinutes(condition) {
+  const delays = {
+    'Clear': 0,
+    'Clouds': 0,
+    'Mist': 2,
+    'Fog': 3,
+    'Rain': 5,
+    'Drizzle': 3,
+    'Thunderstorm': 8,
+    'Snow': 10,
+    'Sleet': 7
+  };
+  return delays[condition] || 0;
+}
+
+// 5. Get weather surge multiplier (demand increase)
+function getWeatherSurgeMultiplier(condition) {
+  const multipliers = {
+    'Clear': 1.0,
+    'Clouds': 1.0,
+    'Mist': 1.1,
+    'Fog': 1.2,
+    'Rain': 1.3,
+    'Drizzle': 1.2,
+    'Thunderstorm': 1.8,
+    'Snow': 2.0,
+    'Sleet': 1.6
+  };
+  return multipliers[condition] || 1.0;
+}
+
+// 6. Get organic demand multiplier based on time
+function getOrganicDemandMultiplier(hour, dayOfWeek) {
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+  const isFridayOrSaturday = dayOfWeek === 5 || dayOfWeek === 6;
+  
+  // Morning commute (7-10am weekdays)
+  if (isWeekday && hour >= 7 && hour < 10) return 1.5;
+  
+  // Evening commute (4-6:30pm weekdays)
+  if (isWeekday && hour >= 16 && hour < 19) return 1.5;
+  
+  // Friday/Saturday night (10pm-2am)
+  if (isFridayOrSaturday && (hour >= 22 || hour < 2)) return 1.5;
+  
+  // Weekend afternoon (12-6pm)
+  if (!isWeekday && hour >= 12 && hour < 18) return 1.2;
+  
+  return 1.0;
+}
+
+// 7. Calculate ETA confidence score
+function calculateETAConfidence(distanceMiles, trafficMult, weatherMult) {
+  let confidence = 1.0;
+  
+  // Distance penalties
+  if (distanceMiles > 20) confidence -= 0.15;
+  else if (distanceMiles > 10) confidence -= 0.10;
+  else if (distanceMiles > 5) confidence -= 0.05;
+  
+  // Traffic penalties
+  if (trafficMult > 1.3) confidence -= 0.10;
+  
+  // Weather penalties
+  if (weatherMult > 1.3) confidence -= 0.10;
+  
+  return Math.max(0.5, Math.min(1.0, confidence));
+}
+
+// 8. Check if point is within geofence (Haversine)
+function isWithinGeofence(lat1, lng1, lat2, lng2, radiusMeters) {
+  const R = 6371000; // Earth's radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const distance = R * c;
+  
+  return distance <= radiusMeters;
+}
+
+// 9. Calculate enhanced route with polyline and steps
+async function calculateEnhancedRoute(origin, destination) {
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      console.warn('⚠️ GOOGLE_MAPS_API_KEY not configured');
+      return createFallbackRoute(origin, destination);
+    }
+    
+    const url = `https://maps.googleapis.com/maps/api/directions/json?` +
+      `origin=${origin.lat},${origin.lng}&` +
+      `destination=${destination.lat},${destination.lng}&` +
+      `mode=driving&` +
+      `departure_time=now&` +
+      `key=${apiKey}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.status !== 'OK' || !data.routes?.[0]) {
+      console.warn('⚠️ Google Directions API error:', data.status);
+      return createFallbackRoute(origin, destination);
+    }
+    
+    const route = data.routes[0];
+    const leg = route.legs[0];
+    
+    // Extract polyline
+    const polyline = route.overview_polyline?.points || null;
+    
+    // Extract and format steps
+    const steps = (leg.steps || []).map(step => ({
+      instruction: step.html_instructions?.replace(/<[^>]*>/g, '') || '',
+      distance: {
+        meters: step.distance?.value || 0,
+        text: step.distance?.text || '',
+        miles: (step.distance?.value || 0) * 0.000621371
+      },
+      duration: {
+        seconds: step.duration?.value || 0,
+        text: step.duration?.text || '',
+        minutes: Math.ceil((step.duration?.value || 0) / 60)
+      },
+      maneuver: step.maneuver || 'straight',
+      start_location: step.start_location,
+      end_location: step.end_location
+    }));
+    
+    // Use traffic-aware duration if available
+    const durationSeconds = leg.duration_in_traffic?.value || leg.duration?.value || 0;
+    const distanceMeters = leg.distance?.value || 0;
+    
+    return {
+      polyline,
+      steps,
+      baseDurationSeconds: durationSeconds,
+      baseDurationMinutes: Math.ceil(durationSeconds / 60),
+      distanceMeters,
+      distanceKm: distanceMeters / 1000,
+      distanceMiles: distanceMeters * 0.000621371,
+      source: 'google_maps'
+    };
+  } catch (error) {
+    console.error('❌ Enhanced route calculation error:', error.message);
+    return createFallbackRoute(origin, destination);
+  }
+}
+
+// 10. Create fallback route when Google API unavailable
+function createFallbackRoute(origin, destination) {
+  const distanceKm = calculateDistance(origin.lat, origin.lng, destination.lat, destination.lng);
+  const distanceMiles = distanceKm * 0.621371;
+  const estimatedMinutes = Math.round(distanceKm / 0.5 + 2); // ~30km/h + 2min buffer
+  
+  return {
+    polyline: null,
+    steps: [],
+    baseDurationSeconds: estimatedMinutes * 60,
+    baseDurationMinutes: estimatedMinutes,
+    distanceMeters: distanceKm * 1000,
+    distanceKm,
+    distanceMiles,
+    source: 'fallback_haversine'
+  };
+}
+
+// 11. Calculate adjusted ETA with all factors
+function calculateAdjustedETA(baseMinutes, trafficMult, weatherMult, weatherDelay, distanceMiles) {
+  const adjustedMinutes = Math.round(baseMinutes * trafficMult * weatherMult + weatherDelay);
+  const confidence = calculateETAConfidence(distanceMiles, trafficMult, weatherMult);
+  const variance = Math.round(adjustedMinutes * 0.2); // ±20%
+  
+  return {
+    adjustedMinutes,
+    confidence,
+    minMinutes: Math.max(1, adjustedMinutes - variance),
+    maxMinutes: adjustedMinutes + variance
+  };
+}
+
+
+
 // Database-driven surge pricing calculation with configurable rules
 async function calculateSurgeMultiplier(pickupLat, pickupLng) {
   if (!db) {
@@ -4014,6 +4274,35 @@ async function calculateSurgeMultiplier(pickupLat, pickupLng) {
       surgeFactors.push('Hot Spot Area');
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2.6: Weather Surge & Organic Demand Enhancement
+    // ═══════════════════════════════════════════════════════════════════
+    
+    // 6a. WEATHER-BASED SURGE (real weather data)
+    try {
+      const weatherData = await getWeatherData(pickupLat, pickupLng);
+      const weatherSurgeFactor = getWeatherSurgeMultiplier(weatherData.condition);
+      
+      if (weatherSurgeFactor > 1.0) {
+        baseMultiplier *= weatherSurgeFactor;
+        surgeFactors.push(`${weatherData.condition} Weather (+${Math.round((weatherSurgeFactor - 1) * 100)}%)`);
+        console.log(`🌧️ Weather surge applied: ${weatherSurgeFactor}x for ${weatherData.condition}`);
+      }
+    } catch (weatherError) {
+      console.warn('⚠️ Weather surge calculation skipped:', weatherError.message);
+    }
+    
+    // 6b. ORGANIC DEMAND SURGE (time-based demand patterns)
+    const organicDemandFactor = getOrganicDemandMultiplier(hour, dayOfWeek);
+    if (organicDemandFactor > 1.0) {
+      baseMultiplier *= organicDemandFactor;
+      const timeLabel = hour >= 7 && hour < 10 ? 'Morning Commute' :
+                        hour >= 16 && hour < 19 ? 'Evening Commute' :
+                        hour >= 22 || hour < 2 ? 'Nightlife' : 'Peak Hours';
+      surgeFactors.push(`${timeLabel} Demand (+${Math.round((organicDemandFactor - 1) * 100)}%)`);
+      console.log(`⏰ Organic demand surge applied: ${organicDemandFactor}x for ${timeLabel}`);
+    }
+    
     // 7. CAP SURGE PRICING using config
     const maxSurgeMultiplier = config.max_surge_multiplier || 3.0;
     const finalMultiplier = Math.min(baseMultiplier, maxSurgeMultiplier);
@@ -4713,6 +5002,214 @@ app.post('/api/rides/estimate', async (req, res) => {
       error: 'Failed to calculate fare estimate',
       message: 'Please try again later'
     });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 2.6: Enhanced Route Calculation with Weather/Traffic/Polyline
+// ═══════════════════════════════════════════════════════════════════
+app.post('/api/routes/calculate', authenticateToken, async (req, res) => {
+  try {
+    const { driverLocation, pickup, destination, refreshRoute } = req.body;
+    
+    console.log('🗺️ Route calculation request:', { driverLocation, pickup, destination, refreshRoute });
+    
+    // Validate inputs
+    if (!driverLocation?.lat || !driverLocation?.lng) {
+      return res.status(400).json({ success: false, error: 'Driver location required' });
+    }
+    if (!pickup?.lat || !pickup?.lng) {
+      return res.status(400).json({ success: false, error: 'Pickup location required' });
+    }
+    if (!destination?.lat || !destination?.lng) {
+      return res.status(400).json({ success: false, error: 'Destination location required' });
+    }
+    
+    // Get current time info
+    const now = new Date();
+    const hour = now.getHours();
+    const dayOfWeek = now.getDay();
+    
+    // Fetch weather data
+    const weather = await getWeatherData(pickup.lat, pickup.lng);
+    
+    // Calculate multipliers
+    const trafficMultiplier = getTrafficMultiplierEnhanced(hour, dayOfWeek);
+    const weatherETAMultiplier = getWeatherETAMultiplier(weather.condition);
+    const weatherDelay = getWeatherDelayMinutes(weather.condition);
+    
+    console.log(`📊 Multipliers - Traffic: ${trafficMultiplier}x, Weather ETA: ${weatherETAMultiplier}x, Delay: +${weatherDelay}min`);
+    
+    // Calculate route to pickup
+    const toPickupRoute = await calculateEnhancedRoute(driverLocation, pickup);
+    const toPickupETA = calculateAdjustedETA(
+      toPickupRoute.baseDurationMinutes,
+      trafficMultiplier,
+      weatherETAMultiplier,
+      weatherDelay,
+      toPickupRoute.distanceMiles
+    );
+    
+    // Calculate route to destination
+    const toDestinationRoute = await calculateEnhancedRoute(pickup, destination);
+    const toDestinationETA = calculateAdjustedETA(
+      toDestinationRoute.baseDurationMinutes,
+      trafficMultiplier,
+      weatherETAMultiplier,
+      weatherDelay,
+      toDestinationRoute.distanceMiles
+    );
+    
+    // Determine traffic level description
+    let trafficLevel = 'light';
+    if (trafficMultiplier >= 1.5) trafficLevel = 'heavy';
+    else if (trafficMultiplier >= 1.2) trafficLevel = 'moderate';
+    
+    // Build response
+    const response = {
+      success: true,
+      refreshed: refreshRoute || false,
+      toPickup: {
+        distance: {
+          km: Number(toPickupRoute.distanceKm.toFixed(2)),
+          miles: Number(toPickupRoute.distanceMiles.toFixed(2))
+        },
+        duration: {
+          base_minutes: toPickupRoute.baseDurationMinutes,
+          traffic_delay_minutes: Math.round(toPickupRoute.baseDurationMinutes * (trafficMultiplier - 1)),
+          weather_delay_minutes: weatherDelay,
+          adjusted_minutes: toPickupETA.adjustedMinutes,
+          seconds: toPickupETA.adjustedMinutes * 60
+        },
+        eta: {
+          arrival_time: new Date(Date.now() + toPickupETA.adjustedMinutes * 60000).toISOString(),
+          confidence_score: toPickupETA.confidence,
+          confidence_range: {
+            min_minutes: toPickupETA.minMinutes,
+            max_minutes: toPickupETA.maxMinutes
+          }
+        },
+        conditions: {
+          traffic_level: trafficLevel,
+          traffic_multiplier: trafficMultiplier,
+          weather_condition: weather.condition,
+          weather_description: weather.description,
+          weather_multiplier: weatherETAMultiplier,
+          temperature_f: weather.temp,
+          is_rush_hour: trafficMultiplier >= 1.5
+        },
+        polyline: toPickupRoute.polyline,
+        steps: toPickupRoute.steps,
+        source: toPickupRoute.source
+      },
+      toDestination: {
+        distance: {
+          km: Number(toDestinationRoute.distanceKm.toFixed(2)),
+          miles: Number(toDestinationRoute.distanceMiles.toFixed(2))
+        },
+        duration: {
+          base_minutes: toDestinationRoute.baseDurationMinutes,
+          traffic_delay_minutes: Math.round(toDestinationRoute.baseDurationMinutes * (trafficMultiplier - 1)),
+          weather_delay_minutes: weatherDelay,
+          adjusted_minutes: toDestinationETA.adjustedMinutes,
+          seconds: toDestinationETA.adjustedMinutes * 60
+        },
+        eta: {
+          arrival_time: new Date(Date.now() + (toPickupETA.adjustedMinutes + toDestinationETA.adjustedMinutes) * 60000).toISOString(),
+          confidence_score: toDestinationETA.confidence,
+          confidence_range: {
+            min_minutes: toDestinationETA.minMinutes,
+            max_minutes: toDestinationETA.maxMinutes
+          }
+        },
+        conditions: {
+          traffic_level: trafficLevel,
+          traffic_multiplier: trafficMultiplier,
+          weather_condition: weather.condition,
+          weather_description: weather.description,
+          weather_multiplier: weatherETAMultiplier,
+          temperature_f: weather.temp,
+          is_rush_hour: trafficMultiplier >= 1.5
+        },
+        polyline: toDestinationRoute.polyline,
+        steps: toDestinationRoute.steps,
+        source: toDestinationRoute.source
+      },
+      totalTrip: {
+        distance: {
+          km: Number((toPickupRoute.distanceKm + toDestinationRoute.distanceKm).toFixed(2)),
+          miles: Number((toPickupRoute.distanceMiles + toDestinationRoute.distanceMiles).toFixed(2))
+        },
+        duration: {
+          base_minutes: toPickupRoute.baseDurationMinutes + toDestinationRoute.baseDurationMinutes,
+          adjusted_minutes: toPickupETA.adjustedMinutes + toDestinationETA.adjustedMinutes,
+          seconds: (toPickupETA.adjustedMinutes + toDestinationETA.adjustedMinutes) * 60
+        },
+        eta: {
+          final_arrival: new Date(Date.now() + (toPickupETA.adjustedMinutes + toDestinationETA.adjustedMinutes) * 60000).toISOString()
+        }
+      },
+      weather: {
+        condition: weather.condition,
+        description: weather.description,
+        temperature_f: weather.temp
+      },
+      geofence: {
+        radius_meters: GEOFENCE_RADIUS_METERS,
+        pickup: { lat: pickup.lat, lng: pickup.lng },
+        dropoff: { lat: destination.lat, lng: destination.lng }
+      },
+      timestamp: now.toISOString()
+    };
+    
+    console.log(`✅ Route calculated: ${response.toPickup.duration.adjusted_minutes}min to pickup, ${response.toDestination.duration.adjusted_minutes}min to destination`);
+    
+    res.json(response);
+    
+  } catch (error) {
+    console.error('❌ Route calculation error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to calculate route',
+      message: error.message
+    });
+  }
+});
+
+// PHASE 2.6: Geofence check endpoint
+app.post('/api/rides/check-geofence', authenticateToken, async (req, res) => {
+  try {
+    const { driverLat, driverLng, targetLat, targetLng, type } = req.body;
+    
+    if (!driverLat || !driverLng || !targetLat || !targetLng) {
+      return res.status(400).json({ success: false, error: 'All coordinates required' });
+    }
+    
+    const withinGeofence = isWithinGeofence(driverLat, driverLng, targetLat, targetLng, GEOFENCE_RADIUS_METERS);
+    
+    // Calculate actual distance
+    const R = 6371000;
+    const dLat = (targetLat - driverLat) * Math.PI / 180;
+    const dLng = (targetLng - driverLng) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(driverLat * Math.PI / 180) * Math.cos(targetLat * Math.PI / 180) *
+      Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distanceMeters = Math.round(R * c);
+    
+    console.log(`📍 Geofence check (${type}): ${distanceMeters}m from target, within=${withinGeofence}`);
+    
+    res.json({
+      success: true,
+      isWithinGeofence: withinGeofence,
+      distanceMeters,
+      radiusMeters: GEOFENCE_RADIUS_METERS,
+      type: type || 'unknown'
+    });
+    
+  } catch (error) {
+    console.error('❌ Geofence check error:', error);
+    res.status(500).json({ success: false, error: 'Failed to check geofence' });
   }
 });
 
