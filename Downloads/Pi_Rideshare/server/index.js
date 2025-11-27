@@ -4368,7 +4368,6 @@ let pricingSettings = {
   maxSurgeMultiplier: 3.0
 };
 
-javascript
 // Helper function to get market-specific settings (use this instead of pricingSettings directly)
 async function getMarketPricingSettings(lat, lng) {
   try {
