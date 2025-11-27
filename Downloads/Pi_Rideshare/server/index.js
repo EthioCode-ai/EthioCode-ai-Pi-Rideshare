@@ -69,8 +69,10 @@ const helmet = require('helmet');
 const slowDown = require('express-slow-down');
 const googleAuthRoutes = require('./google-auth'); // Added for Google OAuth routes
 const chatRoutes = require('./chatbot/chat-routes'); // AI Customer Support Chatbot
+const marketSettingsDB = require('./marketSettingsDB');
 const Stripe = require('stripe');
 const multer = require('multer');
+
 // ═══════════════════════════════════════════════════════════════════
 // PHASE 2.6: Route & Surge Enhancement Constants
 // ═══════════════════════════════════════════════════════════════════
@@ -288,9 +290,9 @@ const authenticateToken = (req, res, next) => {
   }
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid or expired token' });
-    }
+   if (err) {
+  return res.status(403).json({ error: 'Invalid or expired token' });
+ }
     req.user = user;
     next();
   });
@@ -602,9 +604,6 @@ const requestLogger = (req, res, next) => {
 // Apply security middleware
 app.use(ipSecurityMiddleware);
 app.use(requestLogger);
-
-// Initialize database
-initializeDatabase().catch(console.error);
 
 // Global error handlers to prevent unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
@@ -2389,65 +2388,65 @@ app.post('/api/rides/:rideId/cancel', authenticateToken, async (req, res) => {
     let cancellationFee = 0;
     let refundPercentage = 0;
 
-    // Determine refund amount based on ride status and timing
-    switch (rideData.status) {
-      case 'requested':
-      case 'pending':
-        // Full refund for immediate cancellations
-        refundAmount = rideFare;
-        refundPercentage = 100;
-        break;
+    // Get market-specific settings based on pickup location
+    const marketSettings = await getMarketPricingSettings(
+      parseFloat(rideData.pickup_lat),
+      parseFloat(rideData.pickup_lng)
+    );
 
-      case 'accepted':
-        const acceptedAt = new Date(rideData.accepted_at);
-        const timeSinceAccepted = (cancellationTime.getTime() - acceptedAt.getTime()) / 1000; // seconds
+    // Calculate time since accepted (for accepted status)
+    const acceptedAt = rideData.accepted_at ? new Date(rideData.accepted_at) : null;
+    const timeSinceAccepted = acceptedAt 
+      ? (cancellationTime.getTime() - acceptedAt.getTime()) / 1000 
+      : 0;
 
-        if (timeSinceAccepted < 120) { // Less than 2 minutes since acceptance
-          refundAmount = rideFare * 0.95; // 95% refund
-          cancellationFee = rideFare * 0.05;
-          refundPercentage = 95;
-        } else {
-          refundAmount = rideFare * 0.85; // 85% refund
-          cancellationFee = rideFare * 0.15;
-          driverCompensation = rideFare * 0.10; // Compensate driver for time
-          refundPercentage = 85;
-        }
-        break;
+    // Check if surge was active
+    const fareEstimateData = typeof rideData.estimated_fare === 'object' 
+      ? rideData.estimated_fare 
+      : null;
+    const isSurgeActive = fareEstimateData?.surge?.isActive || false;
 
-      case 'driver_arrived':
-        // Driver has arrived - apply cancellation policies
-        const acceptedAtDriverArrived = new Date(rideData.accepted_at);
-        const timeSinceAcceptedDriverArrived = (cancellationTime.getTime() - acceptedAtDriverArrived.getTime()) / 1000; // seconds
+    // Get market-specific cancellation fee from database
+    let feeConfig;
+    try {
+      feeConfig = marketSettingsDB.getCancellationFee(
+        marketSettings.marketId,
+        rideData.status,
+        timeSinceAccepted,
+        isSurgeActive
+      );
+    } catch (error) {
+      console.warn('⚠️ Could not get market cancellation fee, using defaults');
+      // Fallback to hardcoded defaults
+      feeConfig = marketSettingsDB.getDefaultCancellationFee(
+        rideData.status,
+        timeSinceAccepted,
+        isSurgeActive
+      );
+    }
 
-        const waitTimeSeconds = rideData.wait_time_seconds || 0;
-        const isSurgeActive = fareEstimate?.surge?.isActive || false;
+    // Apply cancellation fee based on market rules
+    refundPercentage = feeConfig.refundPercentage;
+    refundAmount = rideFare * (refundPercentage / 100);
+    cancellationFee = rideFare - refundAmount;
 
-        if (isSurgeActive) {
-          // 90% fare charged during surge when driver has arrived
-          refundAmount = rideFare * 0.10;
-          cancellationFee = rideFare * 0.90;
-          refundPercentage = 10;
-        } else {
-          // 75% fare charged when driver has arrived (normal pricing)
-          refundAmount = rideFare * 0.25;
-          cancellationFee = rideFare * 0.75;
-          refundPercentage = 25;
-        }
+    // Calculate driver compensation
+    if (feeConfig.driverCompensationPercentage > 0 && rideData.driver_id) {
+      if (rideData.status === 'driver_arrived') {
+        // For driver_arrived, compensation is capped by pickup distance
+        const pickupDistance = rideData.driver_travel_distance || 2;
+        const maxCompensation = pickupDistance * marketSettings.perMileFare * 1.5;
+        const percentageCompensation = cancellationFee * (feeConfig.driverCompensationPercentage / 100);
+        driverCompensation = Math.min(percentageCompensation, maxCompensation);
+      } else {
+        // For other statuses, use straight percentage
+        driverCompensation = rideFare * (feeConfig.driverCompensationPercentage / 100);
+      }
+    }
 
-        // Calculate driver compensation for pickup
-        const pickupDistance = rideData.driver_travel_distance || 2; // Default 2 miles if not tracked
-        driverCompensation = Math.min(cancellationFee * 0.6, pickupDistance * pricingSettings.perMileFare * 1.5);
-        break;
-
-      case 'in_progress':
-        // No refund once ride has started
-        refundAmount = 0;
-        cancellationFee = rideFare;
-        refundPercentage = 0;
-        break;
-
-      default:
-        return res.status(400).json({ error: 'Invalid ride status for cancellation' });
+    // Validate status is cancellable
+    if (!['requested', 'pending', 'accepted', 'driver_arrived', 'in_progress'].includes(rideData.status)) {
+      return res.status(400).json({ error: 'Invalid ride status for cancellation' });
     }
 
     // Process refund if applicable
@@ -4369,6 +4368,19 @@ let pricingSettings = {
   maxSurgeMultiplier: 3.0
 };
 
+javascript
+// Helper function to get market-specific settings (use this instead of pricingSettings directly)
+async function getMarketPricingSettings(lat, lng) {
+  try {
+    if (marketSettingsDB && typeof marketSettingsDB.getSettingsForLocation === 'function') {
+      return await marketSettingsDB.getSettingsForLocation(lat, lng);
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not fetch market settings, using defaults:', error.message);
+  }
+  return pricingSettings; // Fallback to defaults
+}
+
 // Vehicle Types Storage
 let vehicleTypes = [
   { id: 'economy', name: 'Economy', description: 'Compact cars • Budget-friendly', icon: '🚗', baseFare: 2.10, capacity: 4, enabled: true },
@@ -4866,19 +4878,23 @@ function getNearbyAirport(lat, lng) {
 }
 
 // Enhanced fare calculation with dynamic pricing settings
+// Enhanced fare calculation with dynamic pricing settings
 async function calculateFare(pickup, destination, rideType) {
-  // Use vehicle-specific base fares from settings
+  // Get market-specific settings based on pickup location
+  const settings = await getMarketPricingSettings(pickup.lat, pickup.lng);
+  
+  // Use vehicle-specific base fares from market settings
   const baseFaresByType = {
-    economy: pricingSettings.baseFareEconomy,
-    standard: pricingSettings.baseFareStandard,
-    xl: pricingSettings.baseFareXL,
-    premium: pricingSettings.baseFarePremium
+    economy: settings.baseFareEconomy,
+    standard: settings.baseFareStandard,
+    xl: settings.baseFareXL,
+    premium: settings.baseFarePremium
   };
 
   // Get the base fare for the specific vehicle type
   const baseFare = baseFaresByType[rideType] || baseFaresByType.standard;
-  const perMile = pricingSettings.perMileFare;
-  const perMinute = pricingSettings.perMinuteFare;
+  const perMile = settings.perMileFare;
+  const perMinute = settings.perMinuteFare;
 
   // Calculate REAL driving distance using Google Maps Directions API
   console.log('🚗 Calculating fare with real driving distance...');
@@ -5807,7 +5823,7 @@ class RealTimeMatchingEngine {
 const matchingEngine = new RealTimeMatchingEngine();
 
 // Cascading Driver Request System - 7-second timeout with automatic progression
-function startCascadingDriverRequest(requestData) {
+async function startCascadingDriverRequest(requestData) {
   const { rideId, availableDrivers, currentDriverIndex } = requestData;
   
   if (currentDriverIndex >= availableDrivers.length) {
@@ -5824,11 +5840,14 @@ function startCascadingDriverRequest(requestData) {
   requestData.attemptCount++;
   requestData.attemptStartTime = Date.now();
   
-  // Calculate driver earnings from total fare
-  const totalFare = requestData.estimatedFare;
-  const driverEarnings = totalFare * (pricingSettings.driverCommission / 100);
-  
-  console.log(`💰 Driver earnings calculation: $${totalFare} × ${pricingSettings.driverCommission}% = $${driverEarnings.toFixed(2)}`);
+  // Calculate driver earnings from total fare using market-specific commission
+const totalFare = requestData.estimatedFare;
+const pickupLat = requestData.pickup?.lat || requestData.pickup?.latitude;
+const pickupLng = requestData.pickup?.lng || requestData.pickup?.longitude;
+const marketSettings = await getMarketPricingSettings(pickupLat, pickupLng);
+const driverEarnings = totalFare * (marketSettings.driverCommission / 100);
+
+console.log(`💰 Driver earnings calculation: $${totalFare} × ${marketSettings.driverCommission}% = $${driverEarnings.toFixed(2)} (Market: ${marketSettings.marketCode || 'default'})`);
   
   // Send ride request to current driver with 7-second timeout
   io.to(`user-${currentDriver.id}`).emit('cascading-ride-request', {
@@ -5839,7 +5858,7 @@ function startCascadingDriverRequest(requestData) {
     destinationAddress: requestData.destinationAddress,
     estimatedFare: driverEarnings, // Show driver earnings instead of total fare
     totalFare: totalFare, // Include total fare for reference
-    driverCommission: pricingSettings.driverCommission,
+    driverCommission: marketSettings.driverCommission,
     rideType: requestData.rideType,
     estimatedArrival: currentDriver.estimatedArrival || 5,
     requestTimeout: 7, // 7 seconds to respond (for audio duration)
@@ -8800,10 +8819,18 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
   try {
-    // Initialize database after server starts
-    await initializeDatabase();
-    console.log('💾 Database: Connected and initialized');
-  } catch (error) {
+  // Initialize database after server starts
+  await initializeDatabase();
+  console.log('🗄️ Database: Connected and initialized');
+  
+  // Initialize market settings from database
+  try {
+    await marketSettingsDB.initialize(db);
+    console.log('✅ Market settings loaded from database');
+  } catch (marketError) {
+    console.warn('⚠️ Market settings DB init failed, using defaults:', marketError.message);
+  }
+} catch (error) {
     console.error('❌ Database initialization failed:', error.message);
     console.log('⚠️  Server will continue without database functionality');
   }

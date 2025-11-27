@@ -407,6 +407,34 @@ router.post('/routes/calculate', async (req, res) => {
       const leg1 = route1.data.routes[0].legs[0];
       const leg2 = route2.data.routes[0].legs[0];
 
+      // Extract polyline from overview_polyline
+      const polyline1 = route1.data.routes[0].overview_polyline?.points || null;
+      const polyline2 = route2.data.routes[0].overview_polyline?.points || null;
+
+      // Extract and format steps for turn-by-turn navigation
+      const formatSteps = (steps) => {
+        if (!steps || !Array.isArray(steps)) return [];
+        return steps.map(step => ({
+          instruction: step.html_instructions?.replace(/<[^>]*>/g, '') || '',
+          distance: {
+            meters: step.distance?.value || 0,
+            text: step.distance?.text || '',
+            miles: (step.distance?.value || 0) * 0.000621371
+          },
+          duration: {
+            seconds: step.duration?.value || 0,
+            text: step.duration?.text || '',
+            minutes: Math.ceil((step.duration?.value || 0) / 60)
+          },
+          maneuver: step.maneuver || 'straight',
+          start_location: step.start_location,
+          end_location: step.end_location
+        }));
+      };
+
+      const steps1 = formatSteps(leg1.steps);
+      const steps2 = formatSteps(leg2.steps);
+
       toPickup = {
         distance: {
           km: parseFloat((leg1.distance.value / 1000).toFixed(2)),
@@ -416,6 +444,8 @@ router.post('/routes/calculate', async (req, res) => {
           minutes: Math.round(leg1.duration.value / 60),
           seconds: leg1.duration.value,
         },
+        polyline: polyline1,
+        steps: steps1,
         source: 'google_maps',
       };
 
@@ -428,6 +458,8 @@ router.post('/routes/calculate', async (req, res) => {
           minutes: Math.round(leg2.duration.value / 60),
           seconds: leg2.duration.value,
         },
+        polyline: polyline2,
+        steps: steps2,
         source: 'google_maps',
       };
 
