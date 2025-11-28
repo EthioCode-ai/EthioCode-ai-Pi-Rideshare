@@ -48,6 +48,7 @@ async function refreshCache() {
     return;
   }
   try {
+    console.log('🔍 Attempting to query markets table...');
     // Load markets
     const marketsResult = await db.query(`
       SELECT * FROM markets WHERE status = 'active' ORDER BY market_name
@@ -93,6 +94,7 @@ async function refreshCache() {
     console.log(`📦 Cache refreshed: ${marketsCache.length} markets, ${airportsCache.length} airports`);
   } catch (error) {
     console.error('❌ Cache refresh failed:', error.message);
+    console.error('❌ Full error:', error);
   }
 }
 
