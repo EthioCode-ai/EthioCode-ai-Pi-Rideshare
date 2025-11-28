@@ -35,14 +35,18 @@ async function initialize(database) {
   await refreshCache();
   console.log('✅ Market Settings DB initialized');
   
-  // Auto-refresh cache periodically
-  setInterval(refreshCache, CACHE_TTL_MS);
+// Auto-refresh cache periodically
+setInterval(refreshCache, CACHE_TTL_MS);
 }
 
 /**
  * Refresh all cached data from database
  */
 async function refreshCache() {
+  if (!db) {
+    console.log('⚠️ Cache refresh skipped - no database connection');
+    return;
+  }
   try {
     // Load markets
     const marketsResult = await db.query(`
