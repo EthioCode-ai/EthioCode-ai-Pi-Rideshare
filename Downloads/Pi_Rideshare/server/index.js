@@ -3984,7 +3984,7 @@ async function calculateEnhancedRoute(origin, destination) {
     
     // Extract and format steps
     const steps = (leg.steps || []).map(step => ({
-      instruction: step.html_instructions?.replace(/<[^>]*>/g, '') || '',
+      instruction: step.html_instructions?.replace(/<div[^>]*>/gi, ' ').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim() || '',
       distance: {
         meters: step.distance?.value || 0,
         text: step.distance?.text || '',
@@ -6797,7 +6797,7 @@ io.on('connection', (socket) => {
       }
 
       // Clear any pending timeouts
-      if (rideRequest.currentTimeout) {
+      if (rideRequest && rideRequest.currentTimeout) {
         clearTimeout(rideRequest.currentTimeout);
       }
 
