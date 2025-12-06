@@ -205,9 +205,7 @@ app.use('/api', speedLimiter);
 
 // Middleware
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? ['https://yourdomain.com'] // Replace with your actual domain
-    : true,
+  origin: true,
   credentials: true
 }));
 
@@ -415,8 +413,9 @@ const auditLog = {
 // IP Whitelist/Blacklist management
 const ipAccessControl = {
   whitelist: new Set([
-    '127.0.0.1',
-    '::1',
+    //'127.0.0.1',
+    //'::1',
+    //'72.204.21.125',
     // Add your trusted IPs here
   ]),
   blacklist: new Set([
