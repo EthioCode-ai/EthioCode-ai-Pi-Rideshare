@@ -1273,7 +1273,7 @@ app.get('/api/driver/ride-requests', authenticateToken, async (req, res) => {
 });
 
 // Admin Management APIs - Get all drivers
-app.get('/api/admin/drivers', apiKeyMiddleware(['admin']), async (req, res) => {
+app.get('/api/admin/drivers', authenticateToken, async (req, res) => {
   try {
     const query = `
       SELECT 
