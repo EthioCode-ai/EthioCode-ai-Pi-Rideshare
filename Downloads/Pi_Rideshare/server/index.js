@@ -1621,6 +1621,7 @@ app.post('/api/admin/corporate-applications/:id/review', authenticateToken, asyn
 // Admin dashboard analytics endpoint
 app.get('/api/admin/analytics', authenticateToken, async (req, res) => {
   try {
+    console.log('🔵 ANALYTICS V2 - Dec 9 fix deployed');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
