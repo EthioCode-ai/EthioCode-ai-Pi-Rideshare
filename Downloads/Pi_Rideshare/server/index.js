@@ -414,6 +414,7 @@ const auditLog = {
 const ipAccessControl = {
   whitelist: new Set([
     //'127.0.0.1',
+    '149.102.224.55'
     //'::1',
     //'72.204.21.125',
     // Add your trusted IPs here
@@ -1630,7 +1631,7 @@ app.get('/api/admin/analytics', authenticateToken, async (req, res) => {
         SELECT 
           status,
           COUNT(*) as count,
-          COALESCE(SUM((estimated_fare->>'finalFare')::numeric), 0) as revenue
+          COALESCE(SUM(final_fare), 0) as revenue
         FROM rides 
         WHERE created_at >= $1
         GROUP BY status
@@ -1638,7 +1639,7 @@ app.get('/api/admin/analytics', authenticateToken, async (req, res) => {
       
       // Get total revenue for today
       db.query(`
-        SELECT COALESCE(SUM((estimated_fare->>'finalFare')::numeric), 0) as total_revenue
+        SELECT COALESCE(SUM(final_fare), 0) as total_revenue
         FROM rides 
         WHERE created_at >= $1 AND status IN ('completed', 'in_progress')
       `, [today])
