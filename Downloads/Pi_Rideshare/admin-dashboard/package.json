@@ -1,0 +1,53 @@
+{
+  "name": "react-typescript",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "React TypeScript on Replit, using Vite bundler",
+  "scripts": {
+    "dev": "vite",
+    "dev:all": "concurrently -k -s first -n VITE,API \"vite\" \"NODE_ENV=development PORT=3001 node server/index.js\"",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/google.maps": "^3.58.1",
+    "@types/node": "^20.19.11",
+    "@types/react": "^18.0.15",
+    "@types/react-dom": "^18.0.6",
+    "@vitejs/plugin-react": "^2.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^4.7.4",
+    "vite": "^3.0.4"
+  },
+  "dependencies": {
+    "@stripe/react-stripe-js": "^4.0.2",
+    "@stripe/stripe-js": "^7.9.0",
+    "@types/react-router-dom": "^5.3.3",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
+    "concurrently": "^9.2.1",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "express-slow-down": "^3.0.0",
+    "google-auth-library": "^10.3.0",
+    "helmet": "^8.1.0",
+    "http-server": "^14.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.541.0",
+    "nodemailer": "^7.0.6",
+    "openai": "^5.20.1",
+    "pg": "^8.16.3",
+    "react-router-dom": "^7.8.2",
+    "recharts": "^3.1.2",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "stripe": "^18.5.0",
+    "twilio": "^5.8.2",
+    "uuid": "^11.1.0"
+  }
+}
