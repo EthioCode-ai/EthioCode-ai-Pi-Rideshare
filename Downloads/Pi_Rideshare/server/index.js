@@ -1315,7 +1315,7 @@ app.get('/api/admin/drivers', authenticateToken, async (req, res) => {
 });
 
 // Admin Management APIs - Get all riders
-app.get('/api/admin/riders', apiKeyMiddleware(['admin']), async (req, res) => {
+app.get('/api/admin/riders', authenticateToken, async (req, res) => {
   try {
     const query = `
       SELECT 
@@ -1353,7 +1353,7 @@ app.get('/api/admin/riders', apiKeyMiddleware(['admin']), async (req, res) => {
 });
 
 // Admin Management APIs - Get all rides
-app.get('/api/admin/rides', apiKeyMiddleware(['admin']), async (req, res) => {
+app.get('/api/admin/riders', authenticateToken, async (req, res) => {
   try {
     const query = `
       SELECT 
