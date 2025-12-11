@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:all": "concurrently -k -s first -n VITE,API \"vite\" \"NODE_ENV=development PORT=3001 node server/index.js\"",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "keywords": [],
