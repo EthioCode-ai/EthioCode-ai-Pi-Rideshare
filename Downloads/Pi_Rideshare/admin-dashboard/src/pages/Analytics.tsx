@@ -40,6 +40,7 @@ import {
   ResponsiveContainer,
   Legend
 } from 'recharts';
+import { apiUrl } from '../config/api.config';
 
 interface KPIData {
   title: string;
@@ -91,26 +92,26 @@ const Analytics: React.FC = () => {
   // Fetch real analytics data from database
   React.useEffect(() => {
     const fetchAnalytics = async () => {
-      try {
-        console.log('📊 ANALYTICS: Fetching real data...');
-        
-        const [ridesResponse, driversResponse, ridersResponse] = await Promise.all([
-          fetch('/api/admin/rides', {
-            headers: {
-              'x-api-key': 'admin-key-demo-123',
+  try {
+    console.log('📊 ANALYTICS: Fetching real data...');
+    const token = localStorage.getItem('authToken');
+    const [ridesResponse, driversResponse, ridersResponse] = await Promise.all([
+      fetch(apiUrl('api/admin/rides'), {
+        headers: {
+          'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
             }
           }),
-          fetch('/api/admin/drivers', {
-            headers: {
-              'x-api-key': 'admin-key-demo-123',
-              'Content-Type': 'application/json'
+          fetch(apiUrl('api/admin/drivers'), {
+          headers: {
+         'Authorization': `Bearer ${token}`,
+         'Content-Type': 'application/json'
             }
           }),
-          fetch('/api/admin/riders', {
-            headers: {
-              'x-api-key': 'admin-key-demo-123',
-              'Content-Type': 'application/json'
+          fetch(apiUrl('api/admin/riders'), {
+          headers: {
+         'Authorization': `Bearer ${token}`,
+         'Content-Type': 'application/json'
             }
           })
         ]);
@@ -164,10 +165,11 @@ const Analytics: React.FC = () => {
       setMlLoading(true);
       console.log('🤖 ML ANALYTICS: Fetching ML data...');
       
-      const response = await fetch('/api/admin/ml-analytics', {
-        headers: {
-          'x-api-key': 'admin-key-demo-123',
-          'Content-Type': 'application/json'
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/admin/ml-analytics'), {
+      headers: {
+     'Authorization': `Bearer ${token}`,
+     'Content-Type': 'application/json'
         }
       });
 
