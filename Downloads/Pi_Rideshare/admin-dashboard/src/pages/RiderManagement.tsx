@@ -14,6 +14,7 @@ import {
   Clock,
   TrendingUp
 } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 const RiderManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -26,9 +27,10 @@ const RiderManagement: React.FC = () => {
     const fetchRiders = async () => {
       try {
         console.log('🚶 Fetching riders from API...');
-        const response = await fetch('/api/admin/riders', {
-          headers: {
-            'x-api-key': 'admin-key-demo-123',
+        const token = localStorage.getItem('authToken');
+        const response = await fetch(apiUrl('api/admin/riders'), {
+         headers: {
+        'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           }
         });
