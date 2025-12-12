@@ -1315,7 +1315,7 @@ app.get('/api/admin/drivers', authenticateToken, async (req, res) => {
 });
 
 // Admin Management APIs - Get all riders
-app.get('/api/admin/rides', authenticateToken, async (req, res) => {
+app.get('/api/admin/riders', authenticateToken, async (req, res) => {
   try {
     const query = `
       SELECT 
