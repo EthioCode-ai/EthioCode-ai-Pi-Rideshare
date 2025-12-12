@@ -1356,15 +1356,15 @@ app.get('/api/admin/riders', authenticateToken, async (req, res) => {
 app.get('/api/admin/rides', authenticateToken, async (req, res) => {
   try {
     const query = `
-      SELECT 
+      SELECT
         r.id,
         r.pickup_address,
         r.destination_address,
         r.status,
         r.ride_type,
-        r.requested_at,
-        r.accepted_at,
-        r.started_at,
+        r.created_at as requested_at,
+        r.pickup_time as accepted_at,
+        r.pickup_time as started_at,
         r.completed_at,
         r.final_fare,
         r.estimated_fare,
