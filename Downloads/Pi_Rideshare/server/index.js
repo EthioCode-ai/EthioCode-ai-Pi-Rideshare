@@ -8483,7 +8483,7 @@ app.get('/api/driver/surge/heatmap', authenticateToken, async (req, res) => {
 });
 
 // Get surge heatmap data for real-time visualization
-app.get('/api/admin/surge/heatmap', apiKeyMiddleware(['admin', 'driver']), async (req, res) => {
+app.get('/api/admin/surge/heatmap', authenticateToken, async (req, res) => {
   try {
     console.log('🗺️ Surge Heatmap: Fetching real-time surge zone data...');
     
