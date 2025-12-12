@@ -63,8 +63,8 @@ const Dispatch: React.FC = () => {
             pickup: ride.pickup_address,
             dropoff: ride.destination_address,
             estimatedTime: ride.status === 'requested' ? 'Finding driver...' : '12 min',
-            fare: ride.final_fare ? `$${ride.final_fare.toFixed(2)}` : 
-                  (ride.estimated_fare?.total ? `~$${ride.estimated_fare.total.toFixed(2)}` : 'Calculating...'),
+            fare: ride.final_fare ? `$${parseFloat(ride.final_fare).toFixed(2)}` :
+                   (ride.estimated_fare ? `~$${parseFloat(ride.estimated_fare).toFixed(2)}` : 'Calculating...'),
             distance: '4.2 miles'
           }));
           
