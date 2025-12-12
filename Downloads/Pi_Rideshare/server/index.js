@@ -1223,13 +1223,13 @@ app.get('/api/rides/active', authenticateToken, async (req, res) => {
         r.status,
         r.ride_type,
         r.estimated_fare,
-        r.requested_at,
+        r.created_at,
         u.first_name || ' ' || u.last_name as rider_name,
         u.email as rider_email
       FROM rides r
       JOIN users u ON r.rider_id = u.id
       WHERE r.status IN ('requested', 'accepted', 'en_route', 'arrived')
-      ORDER BY r.requested_at DESC
+      ORDER BY r.created_at DESC
     `;
     
     const result = await db.query(query);
@@ -1254,13 +1254,13 @@ app.get('/api/driver/ride-requests', authenticateToken, async (req, res) => {
         r.destination_lng,
         r.ride_type,
         r.estimated_fare,
-        r.requested_at,
+        r.created_at,
         u.first_name || ' ' || u.last_name as rider_name,
         u.phone as rider_phone
       FROM rides r
       JOIN users u ON r.rider_id = u.id
       WHERE r.status = 'requested'
-      ORDER BY r.requested_at ASC
+      ORDER BY r.created_at ASC
       LIMIT 10
     `;
     
@@ -1379,7 +1379,7 @@ app.get('/api/admin/rides', authenticateToken, async (req, res) => {
       FROM rides r
       JOIN users rider ON r.rider_id = rider.id
       LEFT JOIN users driver ON r.driver_id = driver.id
-      ORDER BY r.requested_at DESC
+      ORDER BY r.created_at DESC
       LIMIT 100
     `;
     
