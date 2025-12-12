@@ -629,6 +629,7 @@ const Analytics: React.FC = () => {
               }}>
                 Revenue Trend
               </h3>
+              {/* @ts-ignore */}
               <ResponsiveContainer width="100%" height={300}>
                 {/* @ts-ignore */}
                 <AreaChart data={revenueData}>
@@ -676,6 +677,7 @@ const Analytics: React.FC = () => {
               }}>
                 Ride Distribution
               </h3>
+              {/* @ts-ignore */}
               <ResponsiveContainer width="100%" height={300}>
                 {/* @ts-ignore */}
                 <RechartsPieChart>
@@ -687,10 +689,11 @@ const Analytics: React.FC = () => {
                     outerRadius={100}
                     paddingAngle={5}
                     dataKey="value"
-                  >
+
+                  >{/* @ts-ignore */}
                     {rideDistribution.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                    )) as any}
                   </Pie>
                   <Tooltip />
                   {/* @ts-ignore */}
@@ -779,6 +782,7 @@ const Analytics: React.FC = () => {
             }}>
               Revenue vs Rides Correlation
             </h3>
+            {/* @ts-ignore */}
             <ResponsiveContainer width="100%" height={400}>
               {/* @ts-ignore */}
               <LineChart data={revenueData}>
@@ -790,6 +794,7 @@ const Analytics: React.FC = () => {
                 {/* @ts-ignore */}
                 <YAxis yAxisId="right" orientation="right" stroke="#6b7280" fontSize={12} />
                 <Tooltip />
+                {/* @ts-ignore */}
                 <Legend />
                 <Line
                   yAxisId="left"
@@ -910,7 +915,9 @@ const Analytics: React.FC = () => {
               }}>
                 Driver Utilization
               </h3>
+              {/* @ts-ignore */}
               <ResponsiveContainer width="100%" height={250}>
+                {/* @ts-ignore */}
                 <BarChart data={[
                   { hour: '6AM', utilization: 45 },
                   { hour: '9AM', utilization: 78 },
@@ -920,6 +927,7 @@ const Analytics: React.FC = () => {
                   { hour: '9PM', utilization: 68 }
                 ]}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  {/* @ts-ignore */}
                   <XAxis dataKey="hour" stroke="#6b7280" fontSize={12} />
                   {/* @ts-ignore */}
                   <YAxis stroke="#6b7280" fontSize={12} />
@@ -943,7 +951,9 @@ const Analytics: React.FC = () => {
               }}>
                 Completion Rates by Hour
               </h3>
+              {/* @ts-ignore */}
               <ResponsiveContainer width="100%" height={250}>
+                {/* @ts-ignore */}
                 <LineChart data={[
                   { hour: '6AM', rate: 94 },
                   { hour: '9AM', rate: 96 },
@@ -953,7 +963,9 @@ const Analytics: React.FC = () => {
                   { hour: '9PM', rate: 96 }
                 ]}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  {/* @ts-ignore */}
                   <XAxis dataKey="hour" stroke="#6b7280" fontSize={12} />
+                  {/* @ts-ignore */}
                   <YAxis stroke="#6b7280" fontSize={12} domain={[90, 100]} />
                   <Tooltip />
                   <Line
@@ -1009,11 +1021,14 @@ const Analytics: React.FC = () => {
                 </span>
               </div>
             </div>
-
+              {/* @ts-ignore */}
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={demandPredictions}>
+              {/* @ts-ignore */}
+               <AreaChart data={demandPredictions}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                {/* @ts-ignore */}
                 <XAxis dataKey="hour" stroke="#6b7280" fontSize={12} />
+                {/* @ts-ignore */}
                 <YAxis stroke="#6b7280" fontSize={12} />
                 <Tooltip
                   contentStyle={{
@@ -1482,11 +1497,14 @@ const Analytics: React.FC = () => {
                 }}>
                   ML Performance Trends
                 </h3>
-                
+                {/* @ts-ignore */}
                 <ResponsiveContainer width="100%" height={300}>
+                  {/* @ts-ignore */}
                   <LineChart data={mlAnalytics.performance_trends.accuracy_trend}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    {/* @ts-ignore */}
                     <XAxis dataKey="time" stroke="#6b7280" fontSize={12} />
+                    {/* @ts-ignore */}
                     <YAxis stroke="#6b7280" fontSize={12} />
                     <Tooltip
                       contentStyle={{

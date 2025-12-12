@@ -113,13 +113,13 @@ const DriverBadgeVerification = () => {
             boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
           }}
           onMouseOver={(e) => {
-            e.target.style.background = 'white';
-            e.target.style.transform = 'translateY(-1px)';
-          }}
+          (e.target as HTMLElement).style.background = 'white';
+          (e.target as HTMLElement).style.transform = 'translateY(-1px)';
+           }}
           onMouseOut={(e) => {
-            e.target.style.background = 'rgba(255, 255, 255, 0.9)';
-            e.target.style.transform = 'translateY(0)';
-          }}
+          (e.target as HTMLElement).style.background = 'rgba(255, 255, 255, 0.9)';
+          (e.target as HTMLElement).style.transform = 'translateY(0)';
+   }}
         >
           <ArrowLeft size={20} />
           Back to Driver App
