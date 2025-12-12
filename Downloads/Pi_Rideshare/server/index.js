@@ -1077,11 +1077,10 @@ app.get('/api/users/trips', authenticateToken, async (req, res) => {
         tip_amount,
         completed_at,
         created_at,
-        requested_at
-      FROM rides 
+        FROM rides 
       WHERE rider_id = $1 
       AND status IN ('completed', 'cancelled')
-      ORDER BY completed_at DESC, requested_at DESC
+      ORDER BY completed_at DESC, created_at DESC
       LIMIT $2
     `, [req.user.userId, limit]);
 
@@ -8519,7 +8518,7 @@ app.get('/api/admin/surge/heatmap', authenticateToken, async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'in_progress') as activeRides,
         COUNT(DISTINCT driver_id) FILTER (WHERE status = 'in_progress') as busyDrivers
       FROM rides
-      WHERE requested_at > NOW() - INTERVAL '1 hour'
+      WHERE created_at > NOW() - INTERVAL '1 hour'
     `;
     
     const demandResult = await db.query(demandQuery);
