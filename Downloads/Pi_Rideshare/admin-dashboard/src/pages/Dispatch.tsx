@@ -12,6 +12,7 @@ import {
   CheckCircle,
   Play
 } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 const Dispatch: React.FC = () => {
   const [selectedRide, setSelectedRide] = useState<number | null>(null);
@@ -26,10 +27,11 @@ const Dispatch: React.FC = () => {
       try {
         console.log('🚗 DISPATCH: Starting to fetch rides...');
         
-        const response = await fetch('/api/admin/rides', {
-          method: 'GET',
-          headers: {
-            'x-api-key': 'admin-key-demo-123',
+        const token = localStorage.getItem('authToken');
+        const response = await fetch(apiUrl('api/admin/rides'), {
+        method: 'GET',
+        headers: {
+        'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
             'Accept': 'application/json'
           }

@@ -13,6 +13,7 @@ import {
   Phone,
   MessageCircle
 } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 const RideManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,9 +25,10 @@ const RideManagement: React.FC = () => {
   React.useEffect(() => {
     const fetchRides = async () => {
       try {
-        const response = await fetch('/api/admin/rides', {
-          headers: {
-            'x-api-key': 'admin-key-demo-123',
+        const token = localStorage.getItem('authToken');
+        const response = await fetch(apiUrl('api/admin/rides'), {
+         headers: {
+         'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           }
         });

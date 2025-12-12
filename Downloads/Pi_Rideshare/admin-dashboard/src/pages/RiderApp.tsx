@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Navigation, Clock, Phone, MessageCircle, Star, User, CreditCard, Menu, Search, Mic, Building2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import RideRequestPrompt from '../components/RideRequestPrompt';
+import { apiUrl } from '../config/api.config';
 
 // Car images from public directory
 const economyCarImg = '/cars/economy.png';
@@ -214,7 +215,7 @@ export default function RiderApp() {
   // Load recent trips from database
   const loadRecentTrips = async () => {
     try {
-      const response = await fetch('/api/users/trips?limit=5', {
+      const response = await fetch(apiUrl('api/users/trips?limit=5'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('token') || ''}`
         }
@@ -569,7 +570,7 @@ export default function RiderApp() {
 
   const loadUserProfile = async () => {
     try {
-      const response = await fetch('/api/users/profile', {
+      const response = await fetch(apiUrl('api/users/profile'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('token') || ''}`
         }
@@ -1257,7 +1258,7 @@ export default function RiderApp() {
         .filter(stop => stop.confirmed && stop.coordinates)
         .map(stop => stop.coordinates);
 
-      const response = await fetch('/api/rides/estimate', {
+      const response = await fetch(apiUrl('api/rides/estimate'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1389,7 +1390,7 @@ export default function RiderApp() {
 
     try {
       console.log('🔄 Updating ride options with backend distance calculation...');
-      const response = await fetch('/api/rides/estimate', {
+      const response = await fetch(apiUrl('api/rides/estimate'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1531,7 +1532,7 @@ export default function RiderApp() {
 
   const loadVehicleTypes = async () => {
     try {
-      const response = await fetch('/api/settings/vehicle-types').catch(fetchError => {
+      const response = await fetch(apiUrl('api/settings/vehicle-types')).catch(fetchError => {
         console.warn('Vehicle types fetch failed:', fetchError);
         return null;
       });
@@ -1569,7 +1570,7 @@ export default function RiderApp() {
   const loadPaymentMethods = async () => {
     setIsLoadingPayments(true);
     try {
-      const response = await fetch('/api/users/550e8400-e29b-41d4-a716-446655440000/payment-methods', {
+      const response = await fetch(apiUrl('api/users/550e8400-e29b-41d4-a716-446655440000/payment-methods'), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken') || localStorage.getItem('token') || ''}`
         }
@@ -1674,7 +1675,7 @@ export default function RiderApp() {
       }
 
       // Create setup intent for the card
-      const response = await fetch('/api/users/550e8400-e29b-41d4-a716-446655440000/setup-intent', {
+      const response = await fetch(apiUrl('api/users/550e8400-e29b-41d4-a716-446655440000/setup-intent'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1711,7 +1712,7 @@ export default function RiderApp() {
       }
 
       // Add payment method to backend
-      const addResponse = await fetch('/api/users/550e8400-e29b-41d4-a716-446655440000/payment-methods', {
+      const addResponse = await fetch(apiUrl('api/users/550e8400-e29b-41d4-a716-446655440000/payment-methods'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1919,7 +1920,7 @@ export default function RiderApp() {
       });
 
       // First, request the ride with backend
-      const rideRequestResponse = await fetch('/api/rides/request', {
+      const rideRequestResponse = await fetch(apiUrl('api/rides/request'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2557,7 +2558,7 @@ export default function RiderApp() {
         session.onvalidatemerchant = async (event) => {
           try {
             // In production, validate with your server
-            const merchantSession = await fetch('/api/payments/apple-pay/validate', {
+            const merchantSession = await fetch(apiUrl('api/payments/apple-pay/validate'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ validationURL: event.validationURL })
@@ -2581,7 +2582,7 @@ export default function RiderApp() {
         session.onpaymentauthorized = async (event) => {
           try {
             // Process payment with your backend
-            const result = await fetch('/api/payments/apple-pay/process', {
+            const result = await fetch(apiUrl('api/payments/apple-pay/process'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -2667,7 +2668,7 @@ export default function RiderApp() {
       });
 
       // Process with your backend
-      const result = await fetch('/api/payments/google-pay/process', {
+      const result = await fetch(apiUrl('api/payments/google-pay/process'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -6231,7 +6232,7 @@ export default function RiderApp() {
                     e.stopPropagation();
                     
                     try {
-                      const response = await fetch('/api/users/profile', {
+                      const response = await fetch(apiUrl('api/users/profile'), {
                         method: 'PUT',
                         headers: {
                           'Content-Type': 'application/json',

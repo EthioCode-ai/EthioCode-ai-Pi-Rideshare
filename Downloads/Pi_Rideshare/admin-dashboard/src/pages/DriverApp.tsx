@@ -31,6 +31,7 @@ import DriverVerificationModal from '../components/DriverVerificationModal';
 import DriverDocumentUpload from '../components/DriverDocumentUpload';
 import ChatBot from '../components/ChatBot';
 import SurgeHeatmapOverlay from '../components/SurgeHeatmapOverlay';
+import { apiUrl } from '../config/api.config';
 
 // A simple ToggleSwitch component for settings
 const ToggleSwitch = ({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) => (
@@ -280,7 +281,7 @@ const DriverApp: React.FC = () => {
     setAuthError('');
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(apiUrl('api/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -2581,7 +2582,7 @@ const DriverApp: React.FC = () => {
         console.log('❌ No authentication token - cannot verify discount');
         return false;
       }
-      const response = await fetch('/api/driver/confirm-discount-verification', {
+      const response = await fetch(apiUrl('api/driver/confirm-discount-verification'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

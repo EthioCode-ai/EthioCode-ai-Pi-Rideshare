@@ -17,6 +17,7 @@ import {
   CheckCircle
 } from 'lucide-react';
 import { marketService, Market } from '../utils/marketService';
+import { apiUrl } from '../config/api.config';
 
 interface SurgeZone {
   id: string;
@@ -61,9 +62,10 @@ const SurgeControl: React.FC = () => {
 
   const loadSurgeZones = async () => {
     try {
-      const response = await fetch('/api/admin/surge/zones', {
-        headers: {
-          'Authorization': 'Bearer demo-rider-token'
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/admin/surge/zones'), {
+      headers: {
+      'Authorization': `Bearer ${token}`
         }
       });
       if (response.ok) {
@@ -101,9 +103,10 @@ const SurgeControl: React.FC = () => {
 
   const loadExistingOverrides = async () => {
     try {
-      const response = await fetch('/api/admin/surge/overrides', {
-        headers: {
-          'Authorization': 'Bearer demo-rider-token'
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/admin/surge/overrides'), {
+      headers: {
+      'Authorization': `Bearer ${token}`
         }
       });
       if (response.ok) {
@@ -216,7 +219,8 @@ const SurgeControl: React.FC = () => {
       const newState = !globalSurgeEnabled;
       setGlobalSurgeEnabled(newState);
 
-      const response = await fetch('/api/admin/surge/global-toggle', {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/admin/surge/global-toggle'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -237,7 +241,8 @@ const SurgeControl: React.FC = () => {
     try {
       setMaxSurgeMultiplier(newMax);
 
-      const response = await fetch('/api/admin/surge/max-multiplier', {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/admin/surge/max-multiplier'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

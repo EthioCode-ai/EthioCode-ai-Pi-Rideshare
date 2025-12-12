@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Eye, Check, X, Building2, User, Calendar, Clock } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 interface CorporateApplication {
   id: string;
@@ -43,9 +44,9 @@ const CorporateApplications: React.FC = () => {
 
   const fetchApplications = async () => {
     try {
-      const response = await fetch('/api/admin/corporate-applications', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+      const response = await fetch(apiUrl('api/admin/corporate-applications'), {
+      headers: {
+      'Authorization': `Bearer ${localStorage.getItem('authToken')}`
         }
       });
       

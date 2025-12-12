@@ -11,6 +11,7 @@ import {
   Play,
   Zap
 } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 const Payment: React.FC = () => {
   const [selectedTimeframe, setSelectedTimeframe] = useState('today');
@@ -20,7 +21,7 @@ const Payment: React.FC = () => {
   const runPaymentTest = async (scenario: string) => {
     setIsRunningTest(true);
     try {
-      const response = await fetch('/api/payments/test/simulate-payment', {
+      const response = await fetch(apiUrl('api/payments/test/simulate-payment'), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -46,7 +47,7 @@ const Payment: React.FC = () => {
   const validatePaymentFlow = async () => {
     setIsRunningTest(true);
     try {
-      const response = await fetch('/api/payments/test/validate-flow', {
+      const response = await fetch(apiUrl('api/payments/test/validate-flow'), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

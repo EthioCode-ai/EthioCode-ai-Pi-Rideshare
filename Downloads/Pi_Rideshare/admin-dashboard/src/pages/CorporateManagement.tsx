@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Building2, Plus, Edit, Trash2, Calendar, Users, DollarSign, Clock, Eye } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 interface Corporation {
   id: string;
@@ -48,9 +49,9 @@ const CorporateManagement: React.FC = () => {
 
   const fetchCorporations = async () => {
     try {
-      const response = await fetch('/api/admin/corporations', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+      const response = await fetch(apiUrl('api/admin/corporations'), {
+      headers: {
+     'Authorization': `Bearer ${localStorage.getItem('authToken')}`
         }
       });
       

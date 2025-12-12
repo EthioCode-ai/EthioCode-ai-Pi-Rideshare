@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Camera, CheckCircle, XCircle, AlertTriangle, User, Calendar, Building2, ArrowLeft, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { apiUrl } from '../config/api.config';
 
 const DriverBadgeVerification = () => {
   const navigate = useNavigate();
@@ -43,7 +44,7 @@ const DriverBadgeVerification = () => {
     
     setVerificationStatus('verifying');
     try {
-      const response = await fetch('/api/driver/verify-badge', {
+      const response = await fetch(apiUrl('api/driver/verify-badge'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

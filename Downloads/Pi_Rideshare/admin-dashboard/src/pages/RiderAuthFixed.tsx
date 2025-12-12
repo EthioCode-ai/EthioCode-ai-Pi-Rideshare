@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff, User, Phone } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 export default function RiderAuthFixed() {
   const [currentView, setCurrentView] = useState<'signin' | 'signup'>('signin');
@@ -94,7 +95,7 @@ export default function RiderAuthFixed() {
     }
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(apiUrl('api/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -167,7 +168,7 @@ export default function RiderAuthFixed() {
     }
 
     try {
-      const response = await fetch('/api/auth/register', {
+      const response = await fetch(apiUrl('api/auth/register'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
