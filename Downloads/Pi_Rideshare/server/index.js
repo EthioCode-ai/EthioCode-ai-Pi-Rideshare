@@ -1307,7 +1307,17 @@ app.get('/api/admin/drivers', authenticateToken, async (req, res) => {
     `;
     
     const result = await db.query(query);
-    res.json({ success: true, drivers: result.rows });
+    
+    // Merge real-time availability from Socket.IO
+    const driversWithRealTimeStatus = result.rows.map(driver => {
+      const realTimeStatus = driverAvailability.get(driver.id);
+      if (realTimeStatus && realTimeStatus.isAvailable) {
+        return { ...driver, status: 'online' };
+      }
+      return driver;
+    });
+    
+    res.json({ success: true, drivers: driversWithRealTimeStatus });
   } catch (error) {
     console.error('Get drivers error:', error);
     res.status(500).json({ error: 'Server error' });
