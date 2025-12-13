@@ -8537,10 +8537,10 @@ app.get('/api/admin/surge/heatmap', authenticateToken, async (req, res) => {
     // Get online drivers count
     const driversQuery = `
       SELECT COUNT(*) as onlineDrivers
-      FROM drivers d
-      JOIN users u ON d.user_id = u.id
-      WHERE d.is_online = true AND d.is_available = true
-    `;
+      FROM users u
+      JOIN driver_locations dl ON u.id = dl.driver_id
+      WHERE u.user_type = 'driver' AND dl.is_available = true
+      `;
     
     const driversResult = await db.query(driversQuery);
     
