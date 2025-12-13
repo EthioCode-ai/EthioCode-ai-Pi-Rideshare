@@ -6555,14 +6555,14 @@ io.on('connection', (socket) => {
       
       // Send individual driver data for map markers
       for (const [driverId, driverData] of driverAvailability.entries()) {
-        if (driverData.isAvailable && driverData.location) {
-          socket.emit('driver-availability-update', {
-            totalDrivers: availableDriversCount,
-            driverId: driverId,
-            status: 'online',
-            isAvailable: true,
-            location: driverData.location,
-            type: 'driver-state-sync'
+        if (driverData.isAvailable && driverData.lat && driverData.lng) {
+         socket.emit('driver-availability-update', {
+         totalDrivers: availableDriversCount,
+         driverId: driverId,
+         status: 'online',
+         isAvailable: true,
+         location: { lat: driverData.lat, lng: driverData.lng },
+         type: 'driver-state-sync'
           });
           console.log(`✅ Synced driver ${driverId} location:`, driverData.location);
         }
