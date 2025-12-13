@@ -6543,7 +6543,7 @@ io.on('connection', (socket) => {
       
       // Get current online drivers count
       const availableDriversCount = Array.from(driverAvailability.values())
-        .filter(driver => driver.isAvailable && driver.status === 'online').length;
+       .filter(driver => driver.isAvailable).length;
       
       console.log(`📊 Sending current state: ${availableDriversCount} drivers online`);
       
@@ -6555,7 +6555,7 @@ io.on('connection', (socket) => {
       
       // Send individual driver data for map markers
       for (const [driverId, driverData] of driverAvailability.entries()) {
-        if (driverData.isAvailable && driverData.status === 'online' && driverData.location) {
+        if (driverData.isAvailable && driverData.location) {
           socket.emit('driver-availability-update', {
             totalDrivers: availableDriversCount,
             driverId: driverId,
