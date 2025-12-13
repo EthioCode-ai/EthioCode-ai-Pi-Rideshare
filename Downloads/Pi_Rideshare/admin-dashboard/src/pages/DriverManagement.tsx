@@ -26,6 +26,9 @@ import {
 } from 'lucide-react';
 import DriverEnrollmentForm from '../components/DriverEnrollmentForm';
 import { apiUrl } from '../config/api.config';
+import { io } from 'socket.io-client';
+import { getSocketUrl } from '../config/api.config';
+
 
 const DriverManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -43,63 +46,75 @@ const DriverManagement: React.FC = () => {
   const [drivers, setDrivers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch real drivers from database
-  React.useEffect(() => {
-    const fetchDrivers = async () => {
-      try {
-        console.log('🚗 Fetching drivers from API...');
-        const token = localStorage.getItem('authToken');
-        const response = await fetch(apiUrl('api/admin/drivers'), {
-        headers: {
+// Fetch real drivers from database
+const fetchDrivers = async () => {
+  try {
+    console.log('🚗 Fetching drivers from API...');
+    const token = localStorage.getItem('authToken');
+    const response = await fetch(apiUrl('api/admin/drivers'), {
+      headers: {
         'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        console.log('🚗 Response status:', response.status, response.statusText);
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('🚗 API response data:', data);
-          
-          // Handle both array and object responses
-          const driversList = Array.isArray(data) ? data : (data.drivers || []);
-          console.log('🚗 Drivers list extracted:', driversList);
-          
-          if (driversList.length > 0) {
-            // Transform API data to match UI expectations
-            const transformedDrivers = driversList.map((driver: any) => ({
-              id: driver.id,
-              name: driver.name,
-              email: driver.email,
-              phone: driver.phone || 'N/A',
-              status: driver.status || 'offline', // Use actual status from API
-              rating: parseFloat(driver.rating) || 5.0,
-              totalRides: driver.total_rides || 0,
-              earnings: driver.total_earnings ? `$${parseFloat(driver.total_earnings).toFixed(2)}` : '$0.00',
-              vehicleModel: driver.vehicle_make && driver.vehicle_model 
-                ? `${driver.vehicle_year || ''} ${driver.vehicle_make} ${driver.vehicle_model}`.trim()
-                : 'Vehicle Pending',
-              location: 'City Area',
-              joinDate: driver.created_at ? new Date(driver.created_at).toLocaleDateString() : 'Unknown'
-            }));
-            console.log('🚗 Transformed drivers:', transformedDrivers);
-            setDrivers(transformedDrivers);
-          } else {
-            console.log('🚗 No drivers found in response');
-          }
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('🚗 Response status:', response.status, response.statusText);
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('🚗 API response data:', data);
+      
+      const driversList = Array.isArray(data) ? data : (data.drivers || []);
+      console.log('🚗 Drivers list extracted:', driversList);
+      
+      if (driversList.length > 0) {
+        const transformedDrivers = driversList.map((driver: any) => ({
+          id: driver.id,
+          name: driver.name,
+          email: driver.email,
+          phone: driver.phone || 'N/A',
+          status: driver.status || 'offline',
+          rating: parseFloat(driver.rating) || 5.0,
+          totalRides: driver.total_rides || 0,
+          earnings: driver.total_earnings ? `$${parseFloat(driver.total_earnings).toFixed(2)}` : '$0.00',
+          vehicleModel: driver.vehicle_make && driver.vehicle_model 
+            ? `${driver.vehicle_year || ''} ${driver.vehicle_make} ${driver.vehicle_model}`.trim()
+            : 'Vehicle Pending',
+          location: 'City Area',
+          joinDate: driver.created_at ? new Date(driver.created_at).toLocaleDateString() : 'Unknown'
+        }));
+          console.log('🚗 Transformed drivers:', transformedDrivers);
+          setDrivers(transformedDrivers);
+         } else {
+          console.log('🚗 No drivers found in response');
+         }
         } else {
           console.error('🚗 API error:', response.status, await response.text());
         }
-      } catch (error) {
-        console.error('🚗 Failed to fetch drivers:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+       } catch (error) {
+          console.error('🚗 Failed to fetch drivers:', error);
+       } finally {
+         setLoading(false);
+       }
+   };
 
+   React.useEffect(() => {
+        fetchDrivers();
+  
+     // Connect to Socket.IO for real-time updates
+      const socket = io(getSocketUrl(), {
+      transports: ['websocket', 'polling']
+    });
+  
+   socket.on('driver-availability-update', () => {
+    console.log('🔄 Driver status changed, refreshing...');
     fetchDrivers();
-  }, []);
+  });
+  
+  return () => {
+    socket.disconnect();
+  };
+}, []);
 
   const getStatusColor = (status: string) => {
     switch (status) {
