@@ -246,7 +246,8 @@ const Dashboard: React.FC = () => {
           ...prev,
           totalRevenue: data.totalRevenue || 0,
           activeRides: data.activeRides || 0,
-          completedRides: data.completedRides || 0
+          completedRides: data.completedRides || 0,
+          onlineDrivers: data.onlineDrivers || prev.onlineDrivers || 0
         }));
       }
     } catch (error) {
