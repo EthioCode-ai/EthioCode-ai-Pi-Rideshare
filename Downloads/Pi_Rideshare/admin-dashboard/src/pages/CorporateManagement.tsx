@@ -72,17 +72,15 @@ const CorporateManagement: React.FC = () => {
     e.preventDefault();
     
     try {
-      const url = editingCorp 
-        ? `/api/admin/corporations/${editingCorp.id}`
-        : '/api/admin/corporations';
-      
-      const method = editingCorp ? 'PUT' : 'POST';
-      
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+      const url = editingCorp
+  ? apiUrl(`api/admin/corporations/${editingCorp.id}`)
+  : apiUrl('api/admin/corporations');
+  const method = editingCorp ? 'PUT' : 'POST';
+  const response = await fetch(url, {
+   method,
+   headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${localStorage.getItem('authToken')}`
         },
         body: JSON.stringify(formData)
       });
