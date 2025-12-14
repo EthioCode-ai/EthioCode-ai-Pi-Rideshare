@@ -79,8 +79,8 @@ const SurgeControl: React.FC = () => {
           surgeMultiplier: parseFloat(zone.base_multiplier) + 1.0, // Convert 0.5 base to 1.5 display
           isManualOverride: false,
           demandLevel: zone.zone_type === 'airport' ? 'high' : 'medium',
-          activeDrivers: Math.floor(Math.random() * 20) + 5,
-          waitingRiders: Math.floor(Math.random() * 15) + 2,
+          activeDrivers: zone.active_drivers || 0,
+          waitingRiders: zone.waiting_riders || 0,
           lastUpdated: new Date(),
           isAirport: zone.zone_type === 'airport',
           airportCode: zone.zone_code,
