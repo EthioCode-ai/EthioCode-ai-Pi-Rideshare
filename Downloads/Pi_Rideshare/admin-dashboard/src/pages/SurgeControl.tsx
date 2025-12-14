@@ -49,6 +49,8 @@ const SurgeControl: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [distanceUnit, setDistanceUnit] = useState<'miles' | 'km'>('miles');
+  const [editingZone, setEditingZone] = useState<any>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   useEffect(() => {
     loadMarkets();
@@ -92,6 +94,7 @@ const loadSettings = async () => {
         const transformedZones: SurgeZone[] = data.zones.map((zone: any) => ({
           id: zone.id,
           name: zone.zone_name,
+          zoneType: zone.zone_type,
           marketId: zone.zone_code?.toLowerCase() || 'unknown',
           coordinates: { lat: parseFloat(zone.latitude), lng: parseFloat(zone.longitude) },
           radius: parseFloat(zone.radius),
@@ -333,7 +336,25 @@ const loadSettings = async () => {
             {autoRefresh ? <Play size={16} /> : <Pause size={16} />}
             Auto Refresh
           </button>
-          
+
+            <button
+            onClick={() => {
+         setEditingZone(null);
+         setShowEditModal(true);
+           }}
+         style={{
+          padding: '4px 8px',
+          backgroundColor: '#3b82f6',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          fontSize: '11px',
+          cursor: 'pointer'
+          }}
+   >
+         Edit Zone
+        </button>
+
           <button
             onClick={toggleGlobalSurge}
             style={{
@@ -771,8 +792,149 @@ const loadSettings = async () => {
           </div>
         </div>
       </div>
+
+      {/* Edit Zone Modal */}
+      {showEditModal && editingZone && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '16px',
+            padding: '24px',
+            width: '500px',
+            maxHeight: '80vh',
+            overflow: 'auto'
+          }}>
+            <h3 style={{ margin: '0 0 20px 0' }}>Edit Zone: {editingZone.name}</h3>
+            
+            <div style={{ display: 'grid', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '4px', fontWeight: '600' }}>Zone Name</label>
+                <input
+                  type="text"
+                  value={editingZone.name}
+                  onChange={(e) => setEditingZone({...editingZone, name: e.target.value})}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }}
+                />
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', fontWeight: '600' }}>Latitude</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={editingZone.coordinates.lat}
+                    onChange={(e) => setEditingZone({...editingZone, coordinates: {...editingZone.coordinates, lat: parseFloat(e.target.value)}})}
+                    style={{ width: '100%', padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', fontWeight: '600' }}>Longitude</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={editingZone.coordinates.lng}
+                    onChange={(e) => setEditingZone({...editingZone, coordinates: {...editingZone.coordinates, lng: parseFloat(e.target.value)}})}
+                    style={{ width: '100%', padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }}
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label style={{ display: 'block', marginBottom: '4px', fontWeight: '600' }}>
+                  Radius ({distanceUnit === 'miles' ? 'miles' : 'km'})
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={distanceUnit === 'miles' ? (editingZone.radius / 1609).toFixed(2) : (editingZone.radius / 1000).toFixed(2)}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    const meters = distanceUnit === 'miles' ? val * 1609 : val * 1000;
+                    setEditingZone({...editingZone, radius: meters});
+                  }}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: 'block', marginBottom: '4px', fontWeight: '600' }}>Zone Type</label>
+                <select
+                  value={editingZone.zoneType || 'city_center'}
+                  onChange={(e) => setEditingZone({...editingZone, zoneType: e.target.value})}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }}
+                >
+                  <option value="airport">Airport</option>
+                  <option value="city_center">City Center</option>
+                  <option value="business">Business District</option>
+                  <option value="entertainment">Entertainment</option>
+                </select>
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowEditModal(false)}
+                style={{ padding: '10px 20px', backgroundColor: '#6b7280', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const token = localStorage.getItem('authToken');
+                    const response = await fetch(apiUrl(`api/admin/surge/zones/${editingZone.id}`), {
+                      method: 'PUT',
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        zoneName: editingZone.name,
+                        zoneType: editingZone.zoneType,
+                        zoneCode: editingZone.airportCode,
+                        latitude: editingZone.coordinates.lat,
+                        longitude: editingZone.coordinates.lng,
+                        radius: editingZone.radius,
+                        baseMultiplier: editingZone.surgeMultiplier - 1.0,
+                        tierLevel: 1,
+                        isActive: true
+                      })
+                    });
+                    if (response.ok) {
+                      setShowEditModal(false);
+                      loadSurgeZones(); // Refresh data
+                      alert('Zone updated successfully!');
+                    } else {
+                      alert('Failed to update zone');
+                    }
+                  } catch (error) {
+                    console.error('Update zone error:', error);
+                    alert('Error updating zone');
+                  }
+                }}
+                style={{ padding: '10px 20px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default SurgeControl;
+
