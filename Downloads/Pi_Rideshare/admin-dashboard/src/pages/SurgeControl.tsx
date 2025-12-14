@@ -560,23 +560,7 @@ const loadSettings = async () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
                   <h4 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', margin: 0 }}>
                     {zone.isAirport ? `${zone.airportCode} - ${zone.name}` : zone.name}
-                    <button
-              onClick={() => {
-          setEditingZone(zone);
-          setShowEditModal(true);
-      }}
-         style={{
-         padding: '4px 8px',
-         backgroundColor: '#3b82f6',
-         color: 'white',
-         border: 'none',
-         borderRadius: '4px',
-         fontSize: '11px',
-         cursor: 'pointer'
-       }}
-       >
-        Edit Zone
-       </button>
+                    
                   </h4>
                   {zone.isManualOverride && (
                     <span style={{
