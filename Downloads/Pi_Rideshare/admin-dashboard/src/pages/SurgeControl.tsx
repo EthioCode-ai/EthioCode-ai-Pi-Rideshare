@@ -152,14 +152,15 @@ const SurgeControl: React.FC = () => {
 
       console.log(`💾 Saving ${overridesToSave.length} zone overrides:`, overridesToSave);
 
-      const response = await fetch('/api/admin/surge/bulk-save', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer demo-rider-token'
-        },
-        body: JSON.stringify({ overrides: overridesToSave })
-      });
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/admin/surge/bulk-save'), {
+      method: 'POST',
+      headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+     },
+     body: JSON.stringify({ overrides: overridesToSave })
+  });
 
       if (response.ok) {
         const data = await response.json();
