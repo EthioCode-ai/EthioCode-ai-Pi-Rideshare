@@ -17,6 +17,8 @@ import {
   Users,
   Activity
 } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
+
 
 const Profile: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
@@ -53,21 +55,43 @@ const Profile: React.FC = () => {
   });
 
   useEffect(() => {
-    // Load profile data from localStorage
-    const savedProfile = localStorage.getItem('admin_profile');
-    const savedNotifications = localStorage.getItem('admin_notifications');
-    const saved2FA = localStorage.getItem('admin_2fa');
-    
-    if (savedProfile) {
-      setProfile(JSON.parse(savedProfile));
+  const fetchProfile = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/users/profile'), {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('👤 Profile loaded:', data);
+        const user = data.user || data;
+        setProfile(prev => ({
+          ...prev,
+          name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Administrator',
+          email: user.email || prev.email,
+          phone: user.phone || prev.phone,
+          role: user.user_type === 'admin' ? 'System Administrator' : user.user_type,
+          joinDate: user.created_at ? new Date(user.created_at).toLocaleDateString() : prev.joinDate,
+          lastLogin: new Date().toLocaleString()
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to load profile:', error);
     }
-    if (savedNotifications) {
-      setNotifications(JSON.parse(savedNotifications));
-    }
-    if (saved2FA) {
-      setTwoFactorEnabled(JSON.parse(saved2FA));
-    }
-  }, []);
+  };
+  
+  fetchProfile();
+  
+  // Also load from localStorage for notifications/2FA
+  const savedNotifications = localStorage.getItem('admin_notifications');
+  const saved2FA = localStorage.getItem('admin_2fa');
+  if (savedNotifications) setNotifications(JSON.parse(savedNotifications));
+  if (saved2FA) setTwoFactorEnabled(JSON.parse(saved2FA));
+}, []);
 
   const handleInputChange = (key: string, value: string) => {
     setProfile(prev => ({ ...prev, [key]: value }));
