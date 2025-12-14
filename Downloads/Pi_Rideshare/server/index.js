@@ -1769,6 +1769,95 @@ app.put('/api/admin/settings/:key', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================================
+// MARKET PRICING SETTINGS API ENDPOINTS
+// ============================================================================
+
+// Get all markets with pricing
+app.get('/api/admin/market-pricing', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT m.id, m.market_name, m.city, m.state, m.status,
+             ms.base_fare_economy, ms.base_fare_standard, ms.base_fare_xl, ms.base_fare_premium,
+             ms.per_mile_fare, ms.per_minute_fare, ms.min_fare, ms.booking_fee, ms.airport_fee,
+             ms.driver_commission_percent, ms.surge_enabled, ms.max_surge_multiplier,
+             ms.grace_period_seconds, ms.wait_rate_per_minute, ms.max_wait_minutes
+      FROM markets m
+      LEFT JOIN market_settings ms ON m.id = ms.market_id
+      ORDER BY m.market_name
+    `);
+    res.json({ success: true, markets: result.rows });
+  } catch (error) {
+    console.error('Get market pricing error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get single market pricing
+app.get('/api/admin/market-pricing/:marketId', authenticateToken, async (req, res) => {
+  try {
+    const { marketId } = req.params;
+    const result = await db.query(`
+      SELECT m.id, m.market_name, m.city, m.state,
+             ms.*
+      FROM markets m
+      LEFT JOIN market_settings ms ON m.id = ms.market_id
+      WHERE m.id = $1
+    `, [marketId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Market not found' });
+    }
+    res.json({ success: true, market: result.rows[0] });
+  } catch (error) {
+    console.error('Get market pricing error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update market pricing
+app.put('/api/admin/market-pricing/:marketId', authenticateToken, async (req, res) => {
+  try {
+    const { marketId } = req.params;
+    const {
+      base_fare_economy, base_fare_standard, base_fare_xl, base_fare_premium,
+      per_mile_fare, per_minute_fare, min_fare, booking_fee, airport_fee,
+      driver_commission_percent, surge_enabled, max_surge_multiplier
+    } = req.body;
+    
+    const result = await db.query(`
+      UPDATE market_settings 
+      SET base_fare_economy = COALESCE($1, base_fare_economy),
+          base_fare_standard = COALESCE($2, base_fare_standard),
+          base_fare_xl = COALESCE($3, base_fare_xl),
+          base_fare_premium = COALESCE($4, base_fare_premium),
+          per_mile_fare = COALESCE($5, per_mile_fare),
+          per_minute_fare = COALESCE($6, per_minute_fare),
+          min_fare = COALESCE($7, min_fare),
+          booking_fee = COALESCE($8, booking_fee),
+          airport_fee = COALESCE($9, airport_fee),
+          driver_commission_percent = COALESCE($10, driver_commission_percent),
+          surge_enabled = COALESCE($11, surge_enabled),
+          max_surge_multiplier = COALESCE($12, max_surge_multiplier),
+          updated_at = NOW(),
+          updated_by = $13
+      WHERE market_id = $14
+      RETURNING *
+    `, [base_fare_economy, base_fare_standard, base_fare_xl, base_fare_premium,
+        per_mile_fare, per_minute_fare, min_fare, booking_fee, airport_fee,
+        driver_commission_percent, surge_enabled, max_surge_multiplier,
+        req.user.userId, marketId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Market settings not found' });
+    }
+    res.json({ success: true, settings: result.rows[0] });
+  } catch (error) {
+    console.error('Update market pricing error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 // Corporate Analytics
 // Admin dashboard analytics endpoint
 app.get('/api/admin/analytics', authenticateToken, async (req, res) => {
