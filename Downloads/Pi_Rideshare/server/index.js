@@ -8632,7 +8632,7 @@ app.post('/api/driver/confirm-discount-verification', authenticateToken, async (
 // SURGE PRICING CONFIGURATION API
 // =================================
 
-// Get all surge zones
+// Get all surge zones with real-time stats
 app.get('/api/admin/surge/zones', authenticateToken, async (req, res) => {
   try {
     const result = await db.query(`
@@ -8641,7 +8641,59 @@ app.get('/api/admin/surge/zones', authenticateToken, async (req, res) => {
       LEFT JOIN users u ON sz.created_by = u.id
       ORDER BY sz.tier_level, sz.zone_name
     `);
-    res.json({ success: true, zones: result.rows });
+    
+    // Get waiting riders (requested rides) per zone
+    const waitingRidersResult = await db.query(`
+      SELECT 
+        pickup_lat, pickup_lng
+      FROM rides 
+      WHERE status = 'requested'
+    `);
+    
+    // Get online drivers from driverAvailability map
+    const onlineDrivers = Array.from(driverAvailability.entries())
+      .filter(([_, data]) => data.isAvailable && data.lat && data.lng)
+      .map(([id, data]) => ({ id, lat: data.lat, lng: data.lng }));
+    
+    // Calculate distance helper (in meters)
+    const getDistance = (lat1, lng1, lat2, lng2) => {
+      const R = 6371000; // Earth's radius in meters
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLng/2) * Math.sin(dLng/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    };
+    
+    // Enrich zones with real counts
+    const zonesWithStats = result.rows.map(zone => {
+      const zoneLat = parseFloat(zone.latitude);
+      const zoneLng = parseFloat(zone.longitude);
+      const zoneRadius = parseFloat(zone.radius); // in meters
+      
+      // Count drivers within zone radius
+      const driversInZone = onlineDrivers.filter(driver => {
+        const dist = getDistance(zoneLat, zoneLng, driver.lat, driver.lng);
+        return dist <= zoneRadius;
+      }).length;
+      
+      // Count waiting riders within zone radius
+      const ridersInZone = waitingRidersResult.rows.filter(ride => {
+        if (!ride.pickup_lat || !ride.pickup_lng) return false;
+        const dist = getDistance(zoneLat, zoneLng, parseFloat(ride.pickup_lat), parseFloat(ride.pickup_lng));
+        return dist <= zoneRadius;
+      }).length;
+      
+      return {
+        ...zone,
+        active_drivers: driversInZone,
+        waiting_riders: ridersInZone
+      };
+    });
+    
+    res.json({ success: true, zones: zonesWithStats });
   } catch (error) {
     console.error('Error fetching surge zones:', error);
     res.status(500).json({ error: 'Failed to fetch surge zones' });
