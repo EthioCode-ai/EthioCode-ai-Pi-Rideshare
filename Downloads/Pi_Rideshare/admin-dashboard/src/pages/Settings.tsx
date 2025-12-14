@@ -22,11 +22,12 @@ const Settings: React.FC = () => {
   const [lastSaved, setLastSaved] = useState<string>('');
 
   const [generalSettings, setGeneralSettings] = useState({
-    siteName: 'RideFlow Admin',
-    siteDescription: 'Advanced Ride-Sharing Management Platform',
-    defaultTimezone: 'America/Los_Angeles',
-    currency: 'USD',
-    language: 'en',
+  siteName: 'Pi VIP Rideshare',
+  siteDescription: 'Premium Ride-Sharing Platform',
+  defaultTimezone: 'America/Chicago',
+  currency: 'USD',
+  language: 'en',
+  distanceUnit: 'miles',
     maintenanceMode: false,
     debugMode: false
   });
@@ -242,17 +243,18 @@ if (selectedMarketId) {
 };
 
   const resetToDefaults = () => {
-    if (confirm('Are you sure you want to reset all settings to default values? This action cannot be undone.')) {
-      // Reset all settings to defaults
-      setGeneralSettings({
-        siteName: 'RideFlow Admin',
-        siteDescription: 'Advanced Ride-Sharing Management Platform',
-        defaultTimezone: 'America/Los_Angeles',
-        currency: 'USD',
-        language: 'en',
-        maintenanceMode: false,
-        debugMode: false
-      });
+  if (confirm('Are you sure you want to reset all settings to default values? This action cannot be undone.')) {
+    // Reset all settings to defaults
+    setGeneralSettings({
+      siteName: 'Pi VIP Rideshare',
+      siteDescription: 'Premium Ride-Sharing Platform',
+      defaultTimezone: 'America/Chicago',
+      currency: 'USD',
+      language: 'en',
+      distanceUnit: 'miles',
+      maintenanceMode: false,
+      debugMode: false
+    });
 
       setRideSettings({
         baseFare: 2.50,
@@ -436,22 +438,25 @@ if (selectedMarketId) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '8px' }}>
-                  Site Name
-                </label>
-                <input
-                  type="text"
-                  value={generalSettings.siteName}
-                  onChange={(e) => handleGeneralChange('siteName', e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                    fontSize: '14px'
-                  }}
-                />
-              </div>
+                  <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '8px' }}>
+               Distance Unit
+             </label>
+             <select
+             value={generalSettings.distanceUnit}
+             onChange={(e) => handleGeneralChange('distanceUnit', e.target.value)}
+              style={{
+              width: '100%',
+              padding: '12px',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px',
+              fontSize: '14px',
+              backgroundColor: 'white'
+            }}
+           >
+            <option value="miles">Miles</option>
+            <option value="km">Kilometers</option>
+            </select>
+            </div>
 
               <div>
                 <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '8px' }}>
