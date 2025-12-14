@@ -48,12 +48,31 @@ const SurgeControl: React.FC = () => {
   const [unsavedChanges, setUnsavedChanges] = useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [distanceUnit, setDistanceUnit] = useState<'miles' | 'km'>('miles');
 
   useEffect(() => {
     loadMarkets();
     loadSurgeZones();
     loadExistingOverrides();
   }, []);
+
+  // Load distance unit setting
+const loadSettings = async () => {
+  try {
+    const token = localStorage.getItem('authToken');
+    const response = await fetch(apiUrl('api/admin/settings'), {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.settings?.general?.distanceUnit) {
+        setDistanceUnit(data.settings.general.distanceUnit);
+      }
+    }
+  } catch (error) {
+    console.log('Using default distance unit');
+  }
+};
 
   const loadMarkets = () => {
     const allMarkets = marketService.getAllMarkets();
@@ -564,7 +583,7 @@ const SurgeControl: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '14px', color: '#6b7280' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <MapPin size={14} />
-                    {zone.isAirport ? `${(zone.radius / 1000).toFixed(1)}km radius` : markets.find(m => m.id === zone.marketId)?.city}
+                    {zone.isAirport ? `${distanceUnit === 'miles' ? (zone.radius / 1609).toFixed(1) : (zone.radius / 1000).toFixed(1)}${distanceUnit === 'miles' ? 'mi' : 'km'} radius` : markets.find(m => m.id === zone.marketId)?.city}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Clock size={14} />
