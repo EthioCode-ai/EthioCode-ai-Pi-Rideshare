@@ -336,25 +336,7 @@ const loadSettings = async () => {
             {autoRefresh ? <Play size={16} /> : <Pause size={16} />}
             Auto Refresh
           </button>
-
-            <button
-            onClick={() => {
-         // Open the edit modal for the first filtered zone (if any) to avoid referencing an undefined variable
-         setEditingZone(filteredZones[0] || null);
-         setShowEditModal(true);
-           }}
-         style={{
-          padding: '4px 8px',
-          backgroundColor: '#3b82f6',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          fontSize: '11px',
-          cursor: 'pointer'
-          }}
-   >
-         Edit Zone
-        </button>
+     
 
           <button
             onClick={toggleGlobalSurge}
