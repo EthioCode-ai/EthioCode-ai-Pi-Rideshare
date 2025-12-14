@@ -45,6 +45,10 @@ const Settings: React.FC = () => {
     driverCommission: 75
   });
 
+  const [markets, setMarkets] = useState<any[]>([]);
+
+  const [selectedMarketId, setSelectedMarketId] = useState<string>('');
+
   const [notificationSettings, setNotificationSettings] = useState({
     emailNotifications: true,
     smsNotifications: true,
@@ -106,7 +110,63 @@ const Settings: React.FC = () => {
   };
   
   loadSettings();
+loadMarkets();
 }, []);
+
+const loadMarkets = async () => {
+  try {
+    const token = localStorage.getItem('authToken');
+    const response = await fetch(apiUrl('api/admin/market-pricing'), {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      console.log('📍 Markets loaded for pricing:', data.markets?.length);
+      setMarkets(data.markets || []);
+      if (data.markets?.length > 0) {
+        setSelectedMarketId(data.markets[0].id);
+        loadMarketPricing(data.markets[0].id);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load markets:', error);
+  }
+};
+
+const loadMarketPricing = async (marketId: string) => {
+  try {
+    const token = localStorage.getItem('authToken');
+    const response = await fetch(apiUrl(`api/admin/market-pricing/${marketId}`), {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      console.log('💰 Market pricing loaded:', data.market);
+      const m = data.market;
+      setRideSettings({
+        baseFare: parseFloat(m.base_fare_economy) || 2.50,
+        perMileRate: parseFloat(m.per_mile_fare) || 1.85,
+        perMinuteRate: parseFloat(m.per_minute_fare) || 0.35,
+        bookingFee: parseFloat(m.booking_fee) || 1.50,
+        cancellationFee: 3.00,
+        maxRideRadius: 25,
+        allowScheduledRides: true,
+        acceptPets: false,
+        acceptTeens: false,
+        surgeMultiplierMax: parseFloat(m.max_surge_multiplier) || 3.0,
+        driverCommission: parseInt(m.driver_commission_percent) || 75
+      });
+    }
+  } catch (error) {
+    console.error('Failed to load market pricing:', error);
+  }
+};
 
   const handleGeneralChange = (key: string, value: any) => {
     setGeneralSettings(prev => ({ ...prev, [key]: value }));
@@ -140,6 +200,25 @@ const Settings: React.FC = () => {
       { key: 'map', value: mapSettings }
     ];
     
+// Save market-specific pricing
+if (selectedMarketId) {
+  await fetch(apiUrl(`api/admin/market-pricing/${selectedMarketId}`), {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      base_fare_economy: rideSettings.baseFare,
+      per_mile_fare: rideSettings.perMileRate,
+      per_minute_fare: rideSettings.perMinuteRate,
+      booking_fee: rideSettings.bookingFee,
+      driver_commission_percent: rideSettings.driverCommission,
+      max_surge_multiplier: rideSettings.surgeMultiplierMax
+    })
+  });
+}
+
     for (const setting of settings) {
       await fetch(apiUrl(`api/admin/settings/${setting.key}`), {
         method: 'PUT',
@@ -505,7 +584,31 @@ const Settings: React.FC = () => {
                     }}
                   />
                 </div>
-
+                 {/* Market Selector */}
+                 <div style={{ marginBottom: '16px' }}>
+                 <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '8px' }}>
+                 Select Market
+               </label>
+              <select
+               value={selectedMarketId}
+               onChange={(e) => {
+                setSelectedMarketId(e.target.value);
+                loadMarketPricing(e.target.value);
+             }}
+               style={{
+                width: '100%',
+                padding: '12px',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                fontSize: '14px',
+                backgroundColor: 'white'
+           }}
+        >
+              {markets.map(m => (
+              <option key={m.id} value={m.id}>{m.market_name} ({m.city}, {m.state})</option>
+            ))}
+             </select>
+               </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '8px' }}>
                     Per Mile Rate ($)
