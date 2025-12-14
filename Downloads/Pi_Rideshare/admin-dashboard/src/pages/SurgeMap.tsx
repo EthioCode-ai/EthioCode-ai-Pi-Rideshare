@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, MapPin, DollarSign, Users, Clock, Plane } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 interface SurgeZone {
   id: string;
@@ -32,6 +33,8 @@ const SurgeMap: React.FC = () => {
   const [refreshInterval, setRefreshInterval] = useState<number>(30);
   const [showAirportMode, setShowAirportMode] = useState<boolean>(true);
   const [showAddAirport, setShowAddAirport] = useState<boolean>(false);
+  const [surgeZones, setSurgeZones] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [newAirport, setNewAirport] = useState({
     name: '',
     code: '',
@@ -653,13 +656,47 @@ const SurgeMap: React.FC = () => {
   };
 
   useEffect(() => {
-    console.log('🗺️ SurgeMap automatic data refresh PAUSED for development');
-    // All automatic data updates are disabled during development
-    // const timer = setInterval(() => {
-    //   console.log('Updating surge data...');
-    // }, refreshInterval * 1000);
-    // return () => clearInterval(timer);
-  }, [refreshInterval]);
+  loadSurgeZones();
+  const timer = setInterval(loadSurgeZones, refreshInterval * 1000);
+  return () => clearInterval(timer);
+}, [refreshInterval]);
+
+const loadSurgeZones = async () => {
+  try {
+    const token = localStorage.getItem('authToken');
+    const response = await fetch(apiUrl('api/admin/surge/zones'), {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('🗺️ Surge zones loaded:', data.zones?.length);
+      
+      // Transform to match UI format
+      const transformed = (data.zones || []).map((z: any) => ({
+        id: z.zone_code?.toLowerCase() || z.id,
+        name: z.zone_name,
+        code: z.zone_code,
+        coordinates: { lat: parseFloat(z.latitude), lng: parseFloat(z.longitude) },
+        radius: z.radius / 1000, // Convert meters to km
+        surgeMultiplier: parseFloat(z.base_multiplier),
+        queueLength: 0,
+        avgWaitTime: 'N/A',
+        demandLevel: z.base_multiplier >= 1.5 ? 'high' : z.base_multiplier >= 1.2 ? 'medium' : 'low',
+        isAirport: z.zone_type === 'airport',
+        zoneType: z.zone_type
+      }));
+      setSurgeZones(transformed);
+    }
+  } catch (error) {
+    console.error('Failed to load surge zones:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const addNewAirport = () => {
     if (newAirport.name && newAirport.code && newAirport.lat && newAirport.lng) {
