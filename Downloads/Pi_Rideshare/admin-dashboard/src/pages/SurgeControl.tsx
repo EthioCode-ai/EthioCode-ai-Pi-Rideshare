@@ -564,7 +564,7 @@ const SurgeControl: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '14px', color: '#6b7280' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <MapPin size={14} />
-                    {zone.isAirport ? `${zone.radius}km radius` : markets.find(m => m.id === zone.marketId)?.city}
+                    {zone.isAirport ? `${(zone.radius / 1000).toFixed(1)}km radius` : markets.find(m => m.id === zone.marketId)?.city}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Clock size={14} />
