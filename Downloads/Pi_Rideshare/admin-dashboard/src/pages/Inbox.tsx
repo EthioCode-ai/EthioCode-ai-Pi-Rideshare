@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Trash2
 } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 interface InboxItem {
   id: string;
@@ -31,56 +32,60 @@ interface InboxItem {
 }
 
 const Inbox: React.FC = () => {
-  const [inboxItems, setInboxItems] = useState<InboxItem[]>([
-    {
-      id: '1',
-      type: 'message',
-      title: 'Message from Alex R.',
-      content: 'I\'m running 2 minutes late due to traffic. Thanks for your patience!',
-      timestamp: new Date(Date.now() - 5 * 60 * 1000),
-      read: false,
-      priority: 'high',
-      metadata: { driverId: 'alex_r', rideId: 'ride_123' }
-    },
-    {
-      id: '2',
-      type: 'receipt',
-      title: 'Trip Receipt',
-      content: 'Your ride to Downtown has been completed. Total: $24.50',
-      timestamp: new Date(Date.now() - 30 * 60 * 1000),
-      read: false,
-      priority: 'medium',
-      metadata: { amount: 24.50, rideId: 'ride_122' }
-    },
-    {
-      id: '3',
-      type: 'notification',
-      title: 'Driver Arrived',
-      content: 'Sarah M. has arrived at your pickup location',
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      read: true,
-      priority: 'high',
-      metadata: { driverId: 'sarah_m', location: 'Main St & 5th Ave' }
-    },
-    {
-      id: '4',
-      type: 'promotion',
-      title: '20% Off Your Next Ride',
-      content: 'Use code SAVE20 on your next trip. Valid until midnight!',
-      timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000),
-      read: true,
-      priority: 'low'
-    },
-    {
-      id: '5',
-      type: 'alert',
-      title: 'Payment Method Updated',
-      content: 'Your default payment method has been successfully updated',
-      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      read: true,
-      priority: 'medium'
+  const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadInbox();
+  }, []);
+
+  const loadInbox = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/admin/inbox'), {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📬 Inbox loaded:', data.notifications?.length);
+        const transformed = (data.notifications || []).map((n: any) => ({
+          id: n.id,
+          type: n.type || 'notification',
+          title: n.title,
+          content: n.message,
+          timestamp: new Date(n.created_at),
+          read: n.is_read,
+          priority: 'medium' as const,
+          metadata: n.data || {}
+        }));
+        setInboxItems(transformed);
+      }
+    } catch (error) {
+      console.error('Failed to load inbox:', error);
+    } finally {
+      setLoading(false);
     }
-  ]);
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const token = localStorage.getItem('authToken');
+      await fetch(apiUrl(`api/admin/inbox/${id}`), {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setInboxItems(prev => prev.filter(item => item.id !== id));
+    } catch (error) {
+      console.error('Delete error:', error);
+    }
+  };
+
+ 
 
   const [filter, setFilter] = useState<'all' | 'unread' | 'messages' | 'receipts'>('all');
 
@@ -127,21 +132,20 @@ const Inbox: React.FC = () => {
 
   const unreadCount = inboxItems.filter(item => !item.read).length;
 
-  const markAsRead = (id: string) => {
-    setInboxItems(items =>
-      items.map(item =>
-        item.id === id ? { ...item, read: true } : item
-      )
-    );
-  };
-
-  const markAsUnread = (id: string) => {
-    setInboxItems(items =>
-      items.map(item =>
-        item.id === id ? { ...item, read: false } : item
-      )
-    );
-  };
+  const markAsRead = async (id: string) => {
+  try {
+    const token = localStorage.getItem('authToken');
+    await fetch(apiUrl(`api/admin/inbox/${id}/read`), {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    setInboxItems(prev => prev.map(item => 
+      item.id === id ? { ...item, read: true } : item
+    ));
+  } catch (error) {
+    console.error('Mark read error:', error);
+  }
+};
 
   const deleteItem = (id: string) => {
     setInboxItems(items => items.filter(item => item.id !== id));
@@ -330,7 +334,7 @@ const Inbox: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      item.read ? markAsUnread(item.id) : markAsRead(item.id);
+                      item.read ? markAsRead(item.id) : markAsRead(item.id);
                     }}
                     style={{
                       background: 'none',
