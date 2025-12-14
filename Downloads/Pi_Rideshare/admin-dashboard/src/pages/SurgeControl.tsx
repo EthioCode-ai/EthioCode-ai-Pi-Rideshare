@@ -84,8 +84,8 @@ const SurgeControl: React.FC = () => {
           lastUpdated: new Date(),
           isAirport: zone.zone_type === 'airport',
           airportCode: zone.zone_code,
-          queueLength: zone.zone_type === 'airport' ? Math.floor(Math.random() * 50) + 10 : undefined,
-          avgWaitTime: zone.zone_type === 'airport' ? `${Math.floor(Math.random() * 20) + 5} min` : undefined
+          queueLength: zone.queue_length || 0,
+          avgWaitTime: zone.avg_wait_time || '0 min'
         }));
         
         setSurgeZones(transformedZones);
@@ -225,7 +225,7 @@ const SurgeControl: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer demo-rider-token'
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
         },
         body: JSON.stringify({ enabled: newState })
       });
