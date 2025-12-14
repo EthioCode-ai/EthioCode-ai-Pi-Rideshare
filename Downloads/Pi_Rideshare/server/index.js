@@ -1627,6 +1627,104 @@ app.post('/api/admin/corporate-applications/:id/review', authenticateToken, asyn
   }
 });
 
+// ============================================================================
+// MARKETS API ENDPOINTS
+// ============================================================================
+
+// Get all markets
+app.get('/api/admin/markets', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT 
+        id, market_code, market_name, city, state, country,
+        center_lat, center_lng, radius_miles, default_zoom,
+        timezone, currency, status, launched_at, created_at
+      FROM markets
+      ORDER BY market_name ASC
+    `);
+    res.json({ success: true, markets: result.rows });
+  } catch (error) {
+    console.error('Get markets error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get single market
+app.get('/api/admin/markets/:marketId', authenticateToken, async (req, res) => {
+  try {
+    const { marketId } = req.params;
+    const result = await db.query('SELECT * FROM markets WHERE id = $1', [marketId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Market not found' });
+    }
+    res.json({ success: true, market: result.rows[0] });
+  } catch (error) {
+    console.error('Get market error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update market
+app.put('/api/admin/markets/:marketId', authenticateToken, async (req, res) => {
+  try {
+    const { marketId } = req.params;
+    const { market_name, city, state, status, radius_miles, center_lat, center_lng } = req.body;
+    const result = await db.query(`
+      UPDATE markets 
+      SET market_name = COALESCE($1, market_name),
+          city = COALESCE($2, city),
+          state = COALESCE($3, state),
+          status = COALESCE($4, status),
+          radius_miles = COALESCE($5, radius_miles),
+          center_lat = COALESCE($6, center_lat),
+          center_lng = COALESCE($7, center_lng)
+      WHERE id = $8
+      RETURNING *
+    `, [market_name, city, state, status, radius_miles, center_lat, center_lng, marketId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Market not found' });
+    }
+    res.json({ success: true, market: result.rows[0] });
+  } catch (error) {
+    console.error('Update market error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Create new market
+app.post('/api/admin/markets', authenticateToken, async (req, res) => {
+  try {
+    const { market_code, market_name, city, state, country, center_lat, center_lng, radius_miles, timezone, currency } = req.body;
+    const result = await db.query(`
+      INSERT INTO markets (market_code, market_name, city, state, country, center_lat, center_lng, radius_miles, timezone, currency, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+      RETURNING *
+    `, [market_code, market_name, city, state, country || 'USA', center_lat, center_lng, radius_miles, timezone || 'America/Chicago', currency || 'USD']);
+    
+    res.json({ success: true, market: result.rows[0] });
+  } catch (error) {
+    console.error('Create market error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete market
+app.delete('/api/admin/markets/:marketId', authenticateToken, async (req, res) => {
+  try {
+    const { marketId } = req.params;
+    const result = await db.query('DELETE FROM markets WHERE id = $1 RETURNING id', [marketId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Market not found' });
+    }
+    res.json({ success: true, message: 'Market deleted' });
+  } catch (error) {
+    console.error('Delete market error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 // Corporate Analytics
 // Admin dashboard analytics endpoint
 app.get('/api/admin/analytics', authenticateToken, async (req, res) => {
