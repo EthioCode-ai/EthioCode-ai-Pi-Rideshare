@@ -18,9 +18,9 @@ const DriverBadgeVerification = () => {
     
     setLoading(true);
     try {
-      const response = await fetch(`/api/driver/rider-corporate-info/${riderId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+      const response = await fetch(apiUrl(`api/driver/rider-corporate-info/${riderId}`), {
+      headers: {
+    'Authorization': `Bearer ${localStorage.getItem('authToken')}`
         }
       });
       

@@ -75,7 +75,7 @@ const CorporateApplications: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`/api/admin/corporate-applications/${applicationId}/review`, {
+      const response = await fetch(apiUrl(`api/admin/corporate-applications/${applicationId}/review`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
