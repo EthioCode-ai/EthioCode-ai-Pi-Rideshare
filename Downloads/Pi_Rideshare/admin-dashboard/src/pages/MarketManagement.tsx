@@ -17,6 +17,7 @@ import {
   Clock
 } from 'lucide-react';
 import { marketService, Market } from '../utils/marketService';
+import { apiUrl } from '../config/api.config';
 
 
 
@@ -26,16 +27,54 @@ const MarketManagement: React.FC = () => {
   const [showAddMarket, setShowAddMarket] = useState(false);
   const [showEditMarket, setShowEditMarket] = useState(false);
   const [showMarketDetails, setShowMarketDetails] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadMarkets();
   }, []);
 
-  const loadMarkets = () => {
-    // Load markets from shared service
-    const allMarkets = marketService.getAllMarkets();
-    setMarkets(allMarkets);
-  };
+  const loadMarkets = async () => {
+  try {
+    setLoading(true);
+    const token = localStorage.getItem('authToken');
+    const response = await fetch(apiUrl('api/admin/markets'), {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('📍 Markets loaded:', data.markets?.length || 0);
+      // Transform API data to match UI format
+      const transformedMarkets = (data.markets || []).map((m: any) => ({
+        id: m.id,
+        name: m.market_name,
+        city: m.city,
+        state: m.state,
+        country: m.country,
+        center: { lat: parseFloat(m.center_lat), lng: parseFloat(m.center_lng) },
+        radius: m.radius_miles,
+        zoom: m.default_zoom || 11,
+        timezone: m.timezone,
+        currency: m.currency,
+        status: m.status,
+        launchedAt: m.launched_at,
+        totalDrivers: 0,
+        totalRiders: 0,
+        monthlyRides: 0,
+        monthlyRevenue: 0,
+        config: {}
+      }));
+      setMarkets(transformedMarkets);
+    }
+  } catch (error) {
+    console.error('Failed to load markets:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -99,13 +138,25 @@ const MarketManagement: React.FC = () => {
     alert('Market updated successfully!');
   };
 
-  const handleDeleteMarket = (marketId: string, marketName: string) => {
-    if (confirm(`Are you sure you want to delete ${marketName}?`)) {
-      marketService.deleteMarket(marketId);
-      loadMarkets(); // Reload from service
-      alert('Market deleted successfully!');
+  const handleDeleteMarket = async (marketId: string, marketName: string) => {
+  if (confirm(`Are you sure you want to delete ${marketName}?`)) {
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl(`api/admin/markets/${marketId}`), {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (response.ok) {
+        loadMarkets();
+        alert('Market deleted successfully!');
+      }
+    } catch (error) {
+      console.error('Delete market error:', error);
     }
-  };
+  }
+};
 
   return (
     <div>
@@ -880,6 +931,10 @@ const MarketDetailsModal: React.FC<{
   market: Market;
   onClose: () => void;
 }> = ({ market, onClose }) => {
+  function getStatusColor(arg0: string): import("csstype").Property.Color {
+    throw new Error('Function not implemented.');
+  }
+
   return (
     <div style={{
       position: 'fixed',
@@ -922,7 +977,7 @@ const MarketDetailsModal: React.FC<{
             <p><strong>Launched:</strong> {new Date(market.launchedAt).toLocaleDateString()}</p>
             <p><strong>Status:</strong> 
               <span style={{ 
-                color: getStatusColor(market.status),
+                color: getStatusColor(market.status || 'pending'),
                 fontWeight: '600',
                 marginLeft: '8px'
               }}>
