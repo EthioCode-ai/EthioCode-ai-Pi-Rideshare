@@ -1724,6 +1724,50 @@ app.delete('/api/admin/markets/:marketId', authenticateToken, async (req, res) =
   }
 });
 
+// ============================================================================
+// ADMIN SETTINGS API ENDPOINTS
+// ============================================================================
+
+// Get all settings
+app.get('/api/admin/settings', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query('SELECT setting_key, setting_value FROM admin_settings');
+    const settings = {};
+    result.rows.forEach(row => {
+      settings[row.setting_key] = row.setting_value;
+    });
+    res.json({ success: true, settings });
+  } catch (error) {
+    console.error('Get settings error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update settings
+app.put('/api/admin/settings/:key', authenticateToken, async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { value } = req.body;
+    const result = await db.query(
+      `UPDATE admin_settings 
+       SET setting_value = $1, updated_at = NOW(), updated_by = $2 
+       WHERE setting_key = $3 
+       RETURNING *`,
+      [JSON.stringify(value), req.user.userId, key]
+    );
+    if (result.rows.length === 0) {
+      // Insert if not exists
+      await db.query(
+        `INSERT INTO admin_settings (setting_key, setting_value, updated_by) VALUES ($1, $2, $3)`,
+        [key, JSON.stringify(value), req.user.userId]
+      );
+    }
+    res.json({ success: true, message: 'Settings updated' });
+  } catch (error) {
+    console.error('Update settings error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // Corporate Analytics
 // Admin dashboard analytics endpoint
