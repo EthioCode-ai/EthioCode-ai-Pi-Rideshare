@@ -15,6 +15,7 @@ import {
   Check,
   X
 } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 const Settings: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -78,25 +79,34 @@ const Settings: React.FC = () => {
   });
 
   useEffect(() => {
-    // Load settings from localStorage
-    const loadSettings = () => {
-      const savedGeneral = localStorage.getItem('admin_general_settings');
-      const savedRide = localStorage.getItem('admin_ride_settings');
-      const savedNotification = localStorage.getItem('admin_notification_settings');
-      const savedSecurity = localStorage.getItem('admin_security_settings');
-      const savedMap = localStorage.getItem('admin_map_settings');
-      const savedTime = localStorage.getItem('admin_settings_last_saved');
-
-      if (savedGeneral) setGeneralSettings(JSON.parse(savedGeneral));
-      if (savedRide) setRideSettings(JSON.parse(savedRide));
-      if (savedNotification) setNotificationSettings(JSON.parse(savedNotification));
-      if (savedSecurity) setSecuritySettings(JSON.parse(savedSecurity));
-      if (savedMap) setMapSettings(JSON.parse(savedMap));
-      if (savedTime) setLastSaved(savedTime);
-    };
-
-    loadSettings();
-  }, []);
+  const loadSettings = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/admin/settings'), {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('⚙️ Settings loaded:', data);
+        if (data.settings) {
+          if (data.settings.general) setGeneralSettings(data.settings.general);
+          if (data.settings.ride) setRideSettings(data.settings.ride);
+          if (data.settings.notifications) setNotificationSettings(data.settings.notifications);
+          if (data.settings.security) setSecuritySettings(data.settings.security);
+          if (data.settings.map) setMapSettings(data.settings.map);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    }
+  };
+  
+  loadSettings();
+}, []);
 
   const handleGeneralChange = (key: string, value: any) => {
     setGeneralSettings(prev => ({ ...prev, [key]: value }));
@@ -119,25 +129,38 @@ const Settings: React.FC = () => {
   };
 
   const saveAllSettings = async () => {
-    setIsLoading(true);
-
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    // Save to localStorage
-    localStorage.setItem('admin_general_settings', JSON.stringify(generalSettings));
-    localStorage.setItem('admin_ride_settings', JSON.stringify(rideSettings));
-    localStorage.setItem('admin_notification_settings', JSON.stringify(notificationSettings));
-    localStorage.setItem('admin_security_settings', JSON.stringify(securitySettings));
-    localStorage.setItem('admin_map_settings', JSON.stringify(mapSettings));
-
+  setIsLoading(true);
+  try {
+    const token = localStorage.getItem('authToken');
+    const settings = [
+      { key: 'general', value: generalSettings },
+      { key: 'ride', value: rideSettings },
+      { key: 'notifications', value: notificationSettings },
+      { key: 'security', value: securitySettings },
+      { key: 'map', value: mapSettings }
+    ];
+    
+    for (const setting of settings) {
+      await fetch(apiUrl(`api/admin/settings/${setting.key}`), {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ value: setting.value })
+      });
+    }
+    
     const saveTime = new Date().toLocaleString();
-    localStorage.setItem('admin_settings_last_saved', saveTime);
     setLastSaved(saveTime);
-
-    setIsLoading(false);
     showNotification('✅ All settings saved successfully!', 'success');
-  };
+  } catch (error) {
+    console.error('Failed to save settings:', error);
+    showNotification('❌ Failed to save settings', 'error');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const resetToDefaults = () => {
     if (confirm('Are you sure you want to reset all settings to default values? This action cannot be undone.')) {
