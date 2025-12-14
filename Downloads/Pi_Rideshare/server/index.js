@@ -1857,6 +1857,67 @@ app.put('/api/admin/market-pricing/:marketId', authenticateToken, async (req, re
   }
 });
 
+// ============================================================================
+// INBOX/NOTIFICATIONS API ENDPOINTS
+// ============================================================================
+
+// Get notifications for current user
+app.get('/api/admin/inbox', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT id, title, message, type, data, is_read, created_at
+      FROM notifications
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 50
+    `, [req.user.userId]);
+    res.json({ success: true, notifications: result.rows });
+  } catch (error) {
+    console.error('Get inbox error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Mark notification as read
+app.put('/api/admin/inbox/:id/read', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.query(
+      'UPDATE notifications SET is_read = true, read_at = NOW() WHERE id = $1 AND user_id = $2',
+      [id, req.user.userId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Mark read error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Mark all as read
+app.put('/api/admin/inbox/read-all', authenticateToken, async (req, res) => {
+  try {
+    await db.query(
+      'UPDATE notifications SET is_read = true, read_at = NOW() WHERE user_id = $1 AND is_read = false',
+      [req.user.userId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Mark all read error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete notification
+app.delete('/api/admin/inbox/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.query('DELETE FROM notifications WHERE id = $1 AND user_id = $2', [id, req.user.userId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete notification error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // Corporate Analytics
 // Admin dashboard analytics endpoint
