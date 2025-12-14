@@ -544,6 +544,24 @@ const loadSettings = async () => {
                     {zone.isAirport ? `${zone.airportCode} - ${zone.name}` : zone.name}
                     
                   </h4>
+
+                  <button
+                   onClick={() => {
+                  setEditingZone(zone);
+                  setShowEditModal(true);
+            }}
+            style={{
+            padding: '4px 8px',
+            backgroundColor: '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            fontSize: '11px',
+            cursor: 'pointer'
+         }}
+         >
+          Edit
+          </button>
                   {zone.isManualOverride && (
                     <span style={{
                       padding: '4px 8px',
