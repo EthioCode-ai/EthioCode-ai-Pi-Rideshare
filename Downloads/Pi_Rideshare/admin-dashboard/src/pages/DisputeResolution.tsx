@@ -22,6 +22,7 @@ import {
   Send,
   Star
 } from 'lucide-react';
+import { apiUrl } from '../config/api.config';
 
 interface Dispute {
   id: string;
@@ -77,124 +78,60 @@ const DisputeResolution: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadDisputes();
   }, []);
 
-  const loadDisputes = () => {
-    // Mock disputes data - in production, fetch from API
-    const mockDisputes: Dispute[] = [
-      {
-        id: 'DSP_001',
-        caseNumber: 'CASE-2024-001234',
-        type: 'fare_dispute',
-        status: 'open',
-        priority: 'medium',
-        rideId: 'RIDE_5678',
-        riderId: 'R001',
-        riderName: 'Alice Johnson',
-        driverId: 'D045',
-        driverName: 'Mike Rodriguez',
-        reportedBy: 'rider',
-        reportedAt: '2024-01-15T14:30:00Z',
-        assignedTo: 'admin_001',
-        subject: 'Incorrect fare charged for short trip',
-        description: 'I was charged $25.50 for a 2-mile trip that should have been around $12. The driver took a longer route than necessary.',
-        requestedRefund: 13.50,
-        evidence: [
-          {
-            id: 'EV_001',
-            type: 'screenshot',
-            url: '/evidence/screenshot1.png',
-            filename: 'fare_screenshot.png',
-            uploadedBy: 'R001',
-            uploadedAt: '2024-01-15T14:35:00Z',
-            description: 'Screenshot of the fare charged'
-          }
-        ],
-        messages: [
-          {
-            id: 'MSG_001',
-            senderId: 'R001',
-            senderName: 'Alice Johnson',
-            senderType: 'rider',
-            message: 'The driver took University Ave instead of the direct route through Main St. This added at least 8 minutes and 1.5 miles to my trip.',
-            sentAt: '2024-01-15T14:40:00Z',
-            isInternal: false
-          },
-          {
-            id: 'MSG_002',
-            senderId: 'admin_001',
-            senderName: 'Support Team',
-            senderType: 'admin',
-            message: 'Thank you for reporting this issue. We are reviewing the trip details and will contact the driver for their response.',
-            sentAt: '2024-01-15T15:00:00Z',
-            isInternal: false
-          }
-        ]
-      },
-      {
-        id: 'DSP_002',
-        caseNumber: 'CASE-2024-001235',
-        type: 'driver_behavior',
-        status: 'investigating',
-        priority: 'high',
-        rideId: 'RIDE_5679',
-        riderId: 'R002',
-        riderName: 'David Chen',
-        driverId: 'D046',
-        driverName: 'Sarah Wilson',
-        reportedBy: 'rider',
-        reportedAt: '2024-01-14T20:45:00Z',
-        assignedTo: 'admin_002',
-        subject: 'Driver was speeding and using phone while driving',
-        description: 'The driver was constantly on their phone during the trip and was driving well above the speed limit. I felt unsafe throughout the ride.',
-        evidence: [],
-        messages: [
-          {
-            id: 'MSG_003',
-            senderId: 'R002',
-            senderName: 'David Chen',
-            senderType: 'rider',
-            message: 'I have dashcam footage from my phone showing the driver using their device. Can I upload video evidence?',
-            sentAt: '2024-01-14T21:00:00Z',
-            isInternal: false
-          }
-        ]
-      },
-      {
-        id: 'DSP_003',
-        caseNumber: 'CASE-2024-001236',
-        type: 'lost_item',
-        status: 'pending_driver',
-        priority: 'medium',
-        rideId: 'RIDE_5680',
-        riderId: 'R003',
-        riderName: 'Emma Davis',
-        driverId: 'D047',
-        driverName: 'John Thompson',
-        reportedBy: 'rider',
-        reportedAt: '2024-01-13T16:20:00Z',
-        assignedTo: 'admin_001',
-        subject: 'Left iPhone in vehicle',
-        description: 'I accidentally left my iPhone 14 Pro in the backseat of the vehicle. It\'s a black phone with a blue case.',
-        evidence: [
-          {
-            id: 'EV_002',
-            type: 'photo',
-            url: '/evidence/phone_photo.jpg',
-            filename: 'my_phone.jpg',
-            uploadedBy: 'R003',
-            uploadedAt: '2024-01-13T16:25:00Z',
-            description: 'Photo of my phone for identification'
-          }
-        ],
-        messages: []
+const loadDisputes = async () => {
+  try {
+    setLoading(true);
+    const token = localStorage.getItem('authToken');
+    const response = await fetch(apiUrl('api/admin/disputes'), {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
       }
-    ];
-    setDisputes(mockDisputes);
-  };
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('⚖️ Disputes loaded:', data.disputes?.length);
+      
+      const transformed = (data.disputes || []).map((d: any) => ({
+        id: d.id,
+        caseNumber: d.case_number,
+        type: d.type,
+        status: d.status,
+        priority: d.priority,
+        rideId: d.ride_id || '',
+        riderId: d.rider_id || '',
+        riderName: d.rider_name || 'Unknown Rider',
+        driverId: d.driver_id || '',
+        driverName: d.driver_name || 'Unknown Driver',
+        reportedBy: d.reported_by,
+        reportedAt: d.reported_at,
+        resolvedAt: d.resolved_at,
+        assignedTo: d.assigned_to,
+        subject: d.subject,
+        description: d.description,
+        requestedRefund: d.requested_refund ? parseFloat(d.requested_refund) : undefined,
+        actualRefund: d.actual_refund ? parseFloat(d.actual_refund) : undefined,
+        evidence: [],
+        messages: [],
+        resolution: d.resolution,
+        resolutionType: d.resolution_type
+      }));
+      
+      setDisputes(transformed);
+    }
+  } catch (error) {
+    console.error('Failed to load disputes:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const getTypeColor = (type: string) => {
     const colors: { [key: string]: string } = {
