@@ -107,24 +107,23 @@ surgeZones.forEach(zone => {
   const color = zone.surgeMultiplier >= 2.0 ? '#dc2626' : zone.surgeMultiplier >= 1.5 ? '#f97316' : '#eab308';
   
   const marker = new google.maps.Marker({
-    position: zone.coordinates,
-    map: map,
-    label: {
-      text: `+$${surgeExtra}`,
-      color: 'white',
-      fontSize: '12px',
-      fontWeight: 'bold'
-    },
-    icon: {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: 22,
-      fillColor: color,
-      fillOpacity: 0.9,
-      strokeColor: 'white',
-      strokeWeight: 2
-    },
-    title: `${zone.name}: ${zone.surgeMultiplier}x surge`
-  });
+  position: zone.coordinates,
+  map: map,
+  label: {
+    text: `+$${surgeExtra}`,
+    color: 'white',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    className: 'surge-label'
+  },
+  icon: {
+    path: google.maps.SymbolPath.CIRCLE,
+    scale: 0,
+    fillOpacity: 0,
+    strokeOpacity: 0
+  },
+  title: `${zone.name}: ${zone.surgeMultiplier}x surge`
+});
   
   if (onZoneClick) {
     marker.addListener('click', () => onZoneClick(zone));
