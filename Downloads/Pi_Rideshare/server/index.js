@@ -1919,6 +1919,142 @@ app.delete('/api/admin/inbox/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================================
+// DISPUTES API ENDPOINTS
+// ============================================================================
+
+// Get all disputes
+app.get('/api/admin/disputes', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT d.*,
+             r.first_name || ' ' || r.last_name as rider_name,
+             r.email as rider_email,
+             dr.first_name || ' ' || dr.last_name as driver_name,
+             dr.email as driver_email
+      FROM disputes d
+      LEFT JOIN users r ON d.rider_id = r.id
+      LEFT JOIN users dr ON d.driver_id = dr.id
+      ORDER BY 
+        CASE d.priority 
+          WHEN 'urgent' THEN 1 
+          WHEN 'high' THEN 2 
+          WHEN 'medium' THEN 3 
+          ELSE 4 
+        END,
+        d.created_at DESC
+    `);
+    res.json({ success: true, disputes: result.rows });
+  } catch (error) {
+    console.error('Get disputes error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get single dispute with messages and evidence
+app.get('/api/admin/disputes/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const disputeResult = await db.query(`
+      SELECT d.*,
+             r.first_name || ' ' || r.last_name as rider_name,
+             r.email as rider_email, r.phone as rider_phone,
+             dr.first_name || ' ' || dr.last_name as driver_name,
+             dr.email as driver_email, dr.phone as driver_phone
+      FROM disputes d
+      LEFT JOIN users r ON d.rider_id = r.id
+      LEFT JOIN users dr ON d.driver_id = dr.id
+      WHERE d.id = $1
+    `, [id]);
+    
+    if (disputeResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Dispute not found' });
+    }
+    
+    const messagesResult = await db.query(`
+      SELECT dm.*, u.first_name || ' ' || u.last_name as sender_name
+      FROM dispute_messages dm
+      LEFT JOIN users u ON dm.sender_id = u.id
+      WHERE dm.dispute_id = $1
+      ORDER BY dm.sent_at ASC
+    `, [id]);
+    
+    const evidenceResult = await db.query(`
+      SELECT * FROM dispute_evidence WHERE dispute_id = $1
+    `, [id]);
+    
+    res.json({ 
+      success: true, 
+      dispute: disputeResult.rows[0],
+      messages: messagesResult.rows,
+      evidence: evidenceResult.rows
+    });
+  } catch (error) {
+    console.error('Get dispute error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update dispute status
+app.put('/api/admin/disputes/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, priority, resolution, resolution_type, actual_refund, assigned_to } = req.body;
+    
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+    
+    if (status) { updates.push(`status = $${paramCount++}`); values.push(status); }
+    if (priority) { updates.push(`priority = $${paramCount++}`); values.push(priority); }
+    if (resolution) { updates.push(`resolution = $${paramCount++}`); values.push(resolution); }
+    if (resolution_type) { updates.push(`resolution_type = $${paramCount++}`); values.push(resolution_type); }
+    if (actual_refund !== undefined) { updates.push(`actual_refund = $${paramCount++}`); values.push(actual_refund); }
+    if (assigned_to) { updates.push(`assigned_to = $${paramCount++}`); values.push(assigned_to); }
+    
+    if (status === 'resolved' || status === 'closed') {
+      updates.push(`resolved_at = NOW()`);
+    }
+    updates.push(`updated_at = NOW()`);
+    
+    values.push(id);
+    
+    const result = await db.query(
+      `UPDATE disputes SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+      values
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Dispute not found' });
+    }
+    
+    res.json({ success: true, dispute: result.rows[0] });
+  } catch (error) {
+    console.error('Update dispute error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Add message to dispute
+app.post('/api/admin/disputes/:id/messages', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { message, is_internal } = req.body;
+    
+    const result = await db.query(`
+      INSERT INTO dispute_messages (dispute_id, sender_id, sender_type, message, is_internal)
+      VALUES ($1, $2, 'admin', $3, $4)
+      RETURNING *
+    `, [id, req.user.userId, message, is_internal || false]);
+    
+    res.json({ success: true, message: result.rows[0] });
+  } catch (error) {
+    console.error('Add dispute message error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 // Corporate Analytics
 // Admin dashboard analytics endpoint
 app.get('/api/admin/analytics', authenticateToken, async (req, res) => {
