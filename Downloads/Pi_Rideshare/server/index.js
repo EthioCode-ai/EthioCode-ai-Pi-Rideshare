@@ -9026,14 +9026,14 @@ app.get('/api/admin/surge/heatmap', authenticateToken, async (req, res) => {
     
     // Format surge zones for heatmap
     const surgeZones = zonesResult.rows.map(zone => ({
-      id: zone.id.toString(),
-      name: zone.name,
-      coordinates: {
-        lat: parseFloat(zone.lat),
-        lng: parseFloat(zone.lng)
-      },
-      surgeMultiplier: parseFloat(zone.surgeMultiplier || 1.0),
-      demandLevel: zone.demandLevel,
+     id: zone.id.toString(),
+     name: zone.name,
+     coordinates: {
+       lat: parseFloat(zone.lat),
+       lng: parseFloat(zone.lng)
+     },
+     surgeMultiplier: parseFloat(zone.surgemultiplier || 1.0),
+     demandLevel: zone.demandlevel || 'low',
       radius: parseFloat(zone.radius || 2.0), // Default 2km radius
       type: zone.type || 'city',
       isActive: zone.is_active
