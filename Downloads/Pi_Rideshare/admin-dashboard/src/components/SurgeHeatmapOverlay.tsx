@@ -6,7 +6,7 @@ interface SurgeZone {
   coordinates: { lat: number; lng: number };
   surgeMultiplier: number;
   demandLevel: 'low' | 'medium' | 'high' | 'extreme';
-  radius?: number; // in kilometers
+  radius?: number;
 }
 
 interface SurgeHeatmapOverlayProps {
@@ -19,135 +19,113 @@ interface SurgeHeatmapOverlayProps {
 const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
   map,
   surgeZones,
-  showLabels = true,
+  showLabels = false,
   onZoneClick
 }) => {
-  const circlesRef = useRef<google.maps.Circle[]>([]);
-  const labelsRef = useRef<google.maps.InfoWindow[]>([]);
-
-  // Get color based on surge multiplier
-  const getSurgeColor = (multiplier: number): string => {
-    if (multiplier >= 2.5) return '#ef4444'; // Red - Extreme surge
-    if (multiplier >= 2.0) return '#f97316'; // Orange - High surge  
-    if (multiplier >= 1.5) return '#eab308'; // Yellow - Medium surge
-    if (multiplier >= 1.2) return '#84cc16'; // Light green - Low surge
-    return '#10b981'; // Green - Normal pricing
-  };
-
-  // Get opacity based on demand level
-  const getSurgeOpacity = (demandLevel: string): number => {
-    switch (demandLevel) {
-      case 'extreme': return 0.4;
-      case 'high': return 0.35;
-      case 'medium': return 0.25;
-      case 'low': return 0.15;
-      default: return 0.2;
-    }
-  };
-
-  // Get zone radius in meters
-  const getZoneRadius = (zone: SurgeZone): number => {
-    if (zone.radius) return zone.radius * 1000; // Convert km to meters
-    
-    // Default radius based on demand level
-    switch (zone.demandLevel) {
-      case 'extreme': return 3000; // 3km
-      case 'high': return 2500;    // 2.5km
-      case 'medium': return 2000;  // 2km
-      case 'low': return 1500;     // 1.5km
-      default: return 2000;
-    }
-  };
+  const heatmapRef = useRef<google.maps.visualization.HeatmapLayer | null>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
 
   // Clear existing overlays
   const clearOverlays = () => {
-    circlesRef.current.forEach(circle => circle.setMap(null));
-    labelsRef.current.forEach(label => label.close());
-    circlesRef.current = [];
-    labelsRef.current = [];
+    if (heatmapRef.current) {
+      heatmapRef.current.setMap(null);
+      heatmapRef.current = null;
+    }
+    markersRef.current.forEach(marker => marker.setMap(null));
+    markersRef.current = [];
   };
 
-  // Create surge zone overlays
+  // Get weight based on surge multiplier (higher surge = more intense heat)
+  const getWeight = (multiplier: number): number => {
+    if (multiplier >= 2.5) return 10;
+    if (multiplier >= 2.0) return 7;
+    if (multiplier >= 1.5) return 5;
+    if (multiplier >= 1.2) return 3;
+    return 1;
+  };
+
+  // Create heatmap layer
   useEffect(() => {
-    if (!map || !window.google || surgeZones.length === 0) return;
+    if (!map || !window.google || !window.google.maps.visualization) {
+      console.warn('Google Maps visualization library not loaded');
+      return;
+    }
 
     clearOverlays();
 
+    if (surgeZones.length === 0) return;
+
+    // Create weighted points for heatmap
+    const heatmapData: google.maps.visualization.WeightedLocation[] = [];
+    
     surgeZones.forEach(zone => {
-      const { lat, lng } = zone.coordinates;
-      const center = new google.maps.LatLng(lat, lng);
-      const color = getSurgeColor(zone.surgeMultiplier);
-      const opacity = getSurgeOpacity(zone.demandLevel);
-      const radius = getZoneRadius(zone);
-
-      // Create circle overlay for surge zone
-      const circle = new google.maps.Circle({
-        strokeColor: color,
-        strokeOpacity: 0.8,
-        strokeWeight: 2,
-        fillColor: color,
-        fillOpacity: opacity,
-        map: map,
-        center: center,
-        radius: radius,
-        clickable: true,
-        zIndex: 1
+      const weight = getWeight(zone.surgeMultiplier);
+      const radius = zone.radius || 2000; // Default 2km
+      
+      // Add center point with high weight
+      heatmapData.push({
+        location: new google.maps.LatLng(zone.coordinates.lat, zone.coordinates.lng),
+        weight: weight * 2
       });
-
-      // Add click handler
-      if (onZoneClick) {
-        circle.addListener('click', () => onZoneClick(zone));
-      }
-
-      circlesRef.current.push(circle);
-
-      // Create info label if enabled
-      if (showLabels) {
-        const labelContent = `
-          <div style="
-            background: white; 
-            border-radius: 8px; 
-            padding: 8px 12px; 
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            border: 2px solid ${color};
-            font-family: 'Inter', sans-serif;
-            text-align: center;
-            min-width: 120px;
-          ">
-            <div style="font-weight: 600; font-size: 14px; color: #1f2937; margin-bottom: 4px;">
-              ${zone.name}
-            </div>
-            <div style="font-size: 18px; font-weight: 700; color: ${color}; margin-bottom: 2px;">
-              ${zone.surgeMultiplier}x
-            </div>
-            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 500;">
-              ${zone.demandLevel} Demand
-            </div>
-          </div>
-        `;
-
-        const infoWindow = new google.maps.InfoWindow({
-          content: labelContent,
-          position: center,
-          disableAutoPan: true,
-          pixelOffset: new google.maps.Size(0, -10)
+      
+      // Add surrounding points to create spread effect based on radius
+      const spreadPoints = 8;
+      const radiusInDegrees = radius / 111000; // Rough meters to degrees
+      
+      for (let i = 0; i < spreadPoints; i++) {
+        const angle = (i / spreadPoints) * 2 * Math.PI;
+        const spreadLat = zone.coordinates.lat + (radiusInDegrees * 0.5 * Math.cos(angle));
+        const spreadLng = zone.coordinates.lng + (radiusInDegrees * 0.5 * Math.sin(angle));
+        
+        heatmapData.push({
+          location: new google.maps.LatLng(spreadLat, spreadLng),
+          weight: weight
         });
-
-        infoWindow.open(map);
-        labelsRef.current.push(infoWindow);
       }
     });
 
-    // Cleanup function
+    // Create heatmap layer
+    heatmapRef.current = new google.maps.visualization.HeatmapLayer({
+      data: heatmapData,
+      map: map,
+      radius: 50,
+      opacity: 0.7,
+      gradient: [
+        'rgba(0, 255, 0, 0)',      // Transparent green
+        'rgba(0, 255, 0, 0.4)',    // Green
+        'rgba(173, 255, 47, 0.6)', // Yellow-green
+        'rgba(255, 255, 0, 0.7)',  // Yellow
+        'rgba(255, 165, 0, 0.8)',  // Orange
+        'rgba(255, 69, 0, 0.9)',   // Red-orange
+        'rgba(255, 0, 0, 1)'       // Red
+      ]
+    });
+
+    // Add clickable markers for zone info (invisible but clickable)
+    if (onZoneClick) {
+      surgeZones.forEach(zone => {
+        const marker = new google.maps.Marker({
+          position: zone.coordinates,
+          map: map,
+          opacity: 0,
+          clickable: true,
+          title: zone.name
+        });
+        
+        marker.addListener('click', () => onZoneClick(zone));
+        markersRef.current.push(marker);
+      });
+    }
+
     return () => clearOverlays();
-  }, [map, surgeZones, showLabels, onZoneClick]);
+  }, [map, surgeZones, onZoneClick]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => clearOverlays();
   }, []);
 
-  return null; // This component doesn't render anything directly
+  return null;
 };
 
 export default SurgeHeatmapOverlay;

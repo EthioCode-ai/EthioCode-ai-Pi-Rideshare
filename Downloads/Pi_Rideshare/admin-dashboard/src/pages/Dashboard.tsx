@@ -35,7 +35,7 @@ const Dashboard: React.FC = () => {
   const [mapError, setMapError] = useState<string | null>(null);
   const [showDrivers, setShowDrivers] = useState(true);
   const [showRiders, setShowRiders] = useState(true);
-  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(true);
   const [activeRides, setActiveRides] = useState<any[]>([]);
   const [driverMarkers, setDriverMarkers] = useState<any[]>([]);
   const [riderMarkers, setRiderMarkers] = useState<any[]>([]);
@@ -1096,29 +1096,23 @@ const Dashboard: React.FC = () => {
               Riders ({realDrivers.filter(d => d.user_type === 'rider').length})
             </button>
 
-            <button
-              onClick={() => {
-                setShowHeatmap(!showHeatmap);
-                if (!showHeatmap) fetchHeatmapData(); // Refresh data when enabling
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 12px',
-                backgroundColor: showHeatmap ? '#ef4444' : '#f1f5f9',
-                color: showHeatmap ? 'white' : '#64748b',
-                border: `2px solid ${showHeatmap ? '#ef4444' : '#e2e8f0'}`,
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              {showHeatmap ? <TrendingUp size={14} /> : <MapPin size={14} />}
-              Surge Heatmap ({heatmapZones.length})
-            </button>
+            <div
+             style={{
+             display: 'flex',
+             alignItems: 'center',
+             gap: '6px',
+             padding: '8px 12px',
+             backgroundColor: heatmapZones.length > 0 ? '#fef2f2' : '#f1f5f9',
+             color: heatmapZones.length > 0 ? '#dc2626' : '#64748b',
+             border: `2px solid ${heatmapZones.length > 0 ? '#fecaca' : '#e2e8f0'}`,
+             borderRadius: '8px',
+             fontSize: '12px',
+             fontWeight: '600'
+           }}
+>
+           <TrendingUp size={14} />
+           Surge Zones: {heatmapZones.length}
+          </div>
           </div>
         </div>
 
