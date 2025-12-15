@@ -101,21 +101,36 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
       ]
     });
 
-    // Add clickable markers for zone info (invisible but clickable)
-    if (onZoneClick) {
-      surgeZones.forEach(zone => {
-        const marker = new google.maps.Marker({
-          position: zone.coordinates,
-          map: map,
-          opacity: 0,
-          clickable: true,
-          title: zone.name
-        });
-        
-        marker.addListener('click', () => onZoneClick(zone));
-        markersRef.current.push(marker);
-      });
-    }
+    // Add labels showing surge amount
+surgeZones.forEach(zone => {
+  const surgeExtra = ((zone.surgeMultiplier - 1) * 5).toFixed(2); // $5 base fare estimate
+  const color = zone.surgeMultiplier >= 2.0 ? '#dc2626' : zone.surgeMultiplier >= 1.5 ? '#f97316' : '#eab308';
+  
+  const marker = new google.maps.Marker({
+    position: zone.coordinates,
+    map: map,
+    label: {
+      text: `+$${surgeExtra}`,
+      color: 'white',
+      fontSize: '12px',
+      fontWeight: 'bold'
+    },
+    icon: {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 22,
+      fillColor: color,
+      fillOpacity: 0.9,
+      strokeColor: 'white',
+      strokeWeight: 2
+    },
+    title: `${zone.name}: ${zone.surgeMultiplier}x surge`
+  });
+  
+  if (onZoneClick) {
+    marker.addListener('click', () => onZoneClick(zone));
+  }
+  markersRef.current.push(marker);
+});
 
     return () => clearOverlays();
   }, [map, surgeZones, onZoneClick]);
