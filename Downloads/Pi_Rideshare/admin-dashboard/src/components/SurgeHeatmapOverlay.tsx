@@ -1,111 +1,105 @@
 import React, { useEffect, useRef } from 'react';
 
-interface SurgeZone {
+interface GridCell {
   id: string;
-  name: string;
-  coordinates: { lat: number; lng: number };
-  surgeMultiplier: number;
-  demandLevel: 'low' | 'medium' | 'high' | 'extreme';
-  radius?: number;
+  code: string;
+  center: { lat: number; lng: number };
+  polygon: { lat: number; lng: number }[];
+  demand: number;
 }
 
 interface SurgeHeatmapOverlayProps {
   map: google.maps.Map | null;
-  surgeZones: SurgeZone[];
-  showLabels?: boolean;
-  onZoneClick?: (zone: SurgeZone) => void;
+  gridCells: GridCell[];
+  onCellClick?: (cell: GridCell) => void;
 }
 
 const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
   map,
-  surgeZones,
-  showLabels = true,
-  onZoneClick
+  gridCells,
+  onCellClick
 }) => {
-  const circlesRef = useRef<google.maps.Circle[]>([]);
+  const polygonsRef = useRef<google.maps.Polygon[]>([]);
   const markersRef = useRef<google.maps.Marker[]>([]);
 
-  // Clear existing overlays
   const clearOverlays = () => {
-    circlesRef.current.forEach(circle => circle.setMap(null));
-    markersRef.current.forEach(marker => marker.setMap(null));
-    circlesRef.current = [];
+    polygonsRef.current.forEach(p => p.setMap(null));
+    markersRef.current.forEach(m => m.setMap(null));
+    polygonsRef.current = [];
     markersRef.current = [];
   };
 
-  // Get color based on surge multiplier
-  const getSurgeColor = (multiplier: number): string => {
-    if (multiplier >= 2.5) return '#dc2626'; // Red
-    if (multiplier >= 2.0) return '#f97316'; // Orange
-    if (multiplier >= 1.5) return '#eab308'; // Yellow
-    return '#22c55e'; // Green
+  // Get color based on demand
+  const getDemandColor = (demand: number): string => {
+    if (demand >= 2.5) return '#dc2626'; // Red
+    if (demand >= 2.0) return '#f97316'; // Orange  
+    if (demand >= 1.75) return '#eab308'; // Yellow
+    if (demand >= 1.5) return '#84cc16'; // Light green
+    return 'transparent'; // No color for normal demand
   };
 
-  // Create gradient circles
+  const getOpacity = (demand: number): number => {
+    if (demand >= 2.5) return 0.6;
+    if (demand >= 2.0) return 0.5;
+    if (demand >= 1.75) return 0.4;
+    if (demand >= 1.5) return 0.3;
+    return 0;
+  };
+
   useEffect(() => {
     if (!map || !window.google) return;
 
     clearOverlays();
 
-    if (surgeZones.length === 0) return;
-
-    surgeZones.forEach(zone => {
-      const baseRadius = zone.radius || 2000;
-      const color = getSurgeColor(zone.surgeMultiplier);
+    gridCells.forEach(cell => {
+      const color = getDemandColor(cell.demand);
+      const opacity = getOpacity(cell.demand);
       
-      // Create concentric circles for gradient effect (outer to inner)
-      const layers = 5;
-      for (let i = layers; i >= 1; i--) {
-        const layerRadius = baseRadius * (i / layers);
-        const opacity = 0.1 + (0.4 * ((layers - i + 1) / layers));
-        
-        const circle = new google.maps.Circle({
-          strokeColor: color,
-          strokeOpacity: i === layers ? 0.3 : 0,
-          strokeWeight: i === layers ? 1 : 0,
-          fillColor: color,
-          fillOpacity: opacity,
-          map: map,
-          center: zone.coordinates,
-          radius: layerRadius,
-          clickable: true,
-          zIndex: i
-        });
+      // Only render cells with demand >= 1.5
+      if (cell.demand < 1.5) return;
 
-        if (onZoneClick) {
-          circle.addListener('click', () => onZoneClick(zone));
-        }
-
-        circlesRef.current.push(circle);
-      }
-
-      // Add surge amount label
-      const surgeExtra = ((zone.surgeMultiplier - 1) * 5).toFixed(2);
-      
-      const marker = new google.maps.Marker({
-        position: zone.coordinates,
+      const polygon = new google.maps.Polygon({
+        paths: cell.polygon.map(p => ({ lat: p.lat, lng: p.lng })),
+        strokeColor: color,
+        strokeOpacity: 0.8,
+        strokeWeight: 1,
+        fillColor: color,
+        fillOpacity: opacity,
         map: map,
-        label: {
-          text: `+$${surgeExtra}`,
-          color: 'white',
-          fontSize: '13px',
-          fontWeight: 'bold'
-        },
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 0
-        },
-        title: `${zone.name}: ${zone.surgeMultiplier}x surge`
+        zIndex: Math.floor(cell.demand * 10)
       });
 
-      if (onZoneClick) {
-        marker.addListener('click', () => onZoneClick(zone));
+      if (onCellClick) {
+        polygon.addListener('click', () => onCellClick(cell));
       }
-      markersRef.current.push(marker);
+
+      polygonsRef.current.push(polygon);
+
+      // Add surge label for high demand cells
+      if (cell.demand >= 1.75) {
+        const surgeExtra = ((cell.demand - 1) * 5).toFixed(2);
+        
+        const marker = new google.maps.Marker({
+          position: cell.center,
+          map: map,
+          label: {
+            text: `+$${surgeExtra}`,
+            color: 'white',
+            fontSize: '11px',
+            fontWeight: 'bold'
+          },
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 0
+          }
+        });
+        
+        markersRef.current.push(marker);
+      }
     });
 
     return () => clearOverlays();
-  }, [map, surgeZones, onZoneClick]);
+  }, [map, gridCells, onCellClick]);
 
   useEffect(() => {
     return () => clearOverlays();
