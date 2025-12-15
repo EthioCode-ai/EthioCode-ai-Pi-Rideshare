@@ -18,6 +18,7 @@ import GoogleMapsError from '../components/GoogleMapsError';
 import { io, Socket } from 'socket.io-client';
 import PiCarIcon from '../assets/Pi_Car1.png';
 import SurgeHeatmapOverlay from '../components/SurgeHeatmapOverlay';
+const SurgeHeatmapOverlayAny = SurgeHeatmapOverlay as any;
 import { apiUrl, getSocketUrl } from '../config/api.config';
 
 declare global {
@@ -345,27 +346,23 @@ const Dashboard: React.FC = () => {
 
   // Fetch surge heatmap data for visualization
   const fetchHeatmapData = async () => {
-    try {
-      const token = localStorage.getItem('authToken');
-      if (!token) return;
-
-      console.log('🗺️ Dashboard: Fetching surge heatmap data...');
-      const response = await fetch(apiUrl('api/admin/surge/heatmap'), {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setHeatmapZones(data.surgeZones || []);
-          setHeatmapStats(data.marketStats || {});
-          console.log(`🗺️ Dashboard: Loaded ${data.surgeZones?.length || 0} surge zones for heatmap`);
-        }
+  try {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    console.log('🔷 Dashboard: Fetching surge grid cells...');
+    const response = await fetch(apiUrl('api/admin/surge/grid'), {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success) {
+        setHeatmapZones(data.cells || []);
+        console.log(`🔷 Dashboard: Loaded ${data.cells?.length || 0} grid cells`);
       }
-    } catch (error) {
-      console.error('❌ Error fetching heatmap data:', error);
-      setHeatmapZones([]);
-      setHeatmapStats({});
+    }
+  } catch (error) {
+    console.error('❌ Error fetching grid cells:', error);
+    setHeatmapZones([]);
     }
   };
 
@@ -1127,18 +1124,20 @@ const Dashboard: React.FC = () => {
         }}>
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
           
-          {/* Surge Heatmap Overlay */}
           {showHeatmap && map && (
-            <SurgeHeatmapOverlay
-              map={map}
-              surgeZones={heatmapZones}
-              showLabels={true}
-              onZoneClick={(zone) => {
-                console.log('🗺️ Surge zone clicked:', zone);
-                // Could open zone details modal here
-              }}
-            />
+            <>
+              {/* @ts-ignore */}
+              <SurgeHeatmapOverlayAny
+                map={map}
+                gridCells={heatmapZones}
+                onZoneClick={(zone: any) => {
+                  console.log('🗺️ Surge zone clicked:', zone);
+                  // Could open zone details modal here
+                }}
+              />
+            </>
           )}
+          
 
           {!isMapLoaded && (
             <div style={{
