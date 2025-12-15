@@ -9107,6 +9107,46 @@ app.get('/api/admin/surge/heatmap', authenticateToken, async (req, res) => {
   }
 });
 
+// Get surge grid cells for heatmap visualization
+app.get('/api/admin/surge/grid', authenticateToken, async (req, res) => {
+  try {
+    const { marketId } = req.query;
+    
+    let query = `
+      SELECT id, cell_code, center_lat, center_lng, polygon_coords, current_demand, updated_at
+      FROM surge_grid_cells 
+      WHERE is_active = true
+    `;
+    const params = [];
+    
+    if (marketId) {
+      query += ` AND market_id = $1`;
+      params.push(marketId);
+    }
+    
+    query += ` ORDER BY current_demand DESC`;
+    
+    const result = await db.query(query, params);
+    
+    const cells = result.rows.map(cell => ({
+      id: cell.id,
+      code: cell.cell_code,
+      center: { lat: parseFloat(cell.center_lat), lng: parseFloat(cell.center_lng) },
+      polygon: cell.polygon_coords,
+      demand: parseFloat(cell.current_demand),
+      updatedAt: cell.updated_at
+    }));
+    
+    console.log(`🔷 Surge grid: Returning ${cells.length} cells`);
+    res.json({ success: true, cells });
+  } catch (error) {
+    console.error('Surge grid error:', error);
+    res.status(500).json({ error: 'Failed to fetch surge grid' });
+  }
+});
+
+
+
 // Get all time rules
 app.get('/api/admin/surge/time-rules', authenticateToken, async (req, res) => {
   try {
