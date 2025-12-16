@@ -265,9 +265,9 @@ const Dashboard: React.FC = () => {
   
   // Auto-refresh analytics every 30 seconds
   useEffect(() => {
-    const interval = setInterval(fetchRealAnalytics, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  const interval = setInterval(fetchHeatmapData, 60000);
+  return () => clearInterval(interval);
+}, []);
   
 
   // Dynamic stats based on real-time data
@@ -349,15 +349,15 @@ const Dashboard: React.FC = () => {
   try {
     const token = localStorage.getItem('authToken');
     if (!token) return;
-    console.log('🔷 Dashboard: Fetching surge grid cells...');
-    const response = await fetch(apiUrl('api/admin/surge/grid'), {
+    console.log('🔥 Dashboard: Fetching active surge zones...');
+    const response = await fetch(apiUrl('api/admin/surge/active-zones'), {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (response.ok) {
       const data = await response.json();
       if (data.success) {
-        setHeatmapZones(data.cells || []);
-        console.log(`🔷 Dashboard: Loaded ${data.cells?.length || 0} grid cells`);
+        setHeatmapZones(data.zones || []);
+        console.log(`🔥 Dashboard: ${data.zones?.length || 0} active surge zones`);
       }
     }
   } catch (error) {
