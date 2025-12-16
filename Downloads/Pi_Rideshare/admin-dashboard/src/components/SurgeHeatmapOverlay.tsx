@@ -56,7 +56,7 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
           Math.pow(h.center.lat - zone.center.lat, 2) +
           Math.pow(h.center.lng - zone.center.lng, 2)
         );
-        return dist < 0.004; // Smaller = more labels
+        return dist < 0.002; // Smaller = more labels
       });
 
       if (!tooClose) {
