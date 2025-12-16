@@ -9149,7 +9149,7 @@ app.get('/api/admin/surge/grid', authenticateToken, async (req, res) => {
 app.post('/api/admin/markets/:id/generate-grid', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { cellSize = 0.15, coverageMultiplier = 1.0 } = req.body; // cellSize in miles
+    const { cellSize = 0.15, maxRadiusMiles = 5 } = req.body; // cellSize and max radius in miles
     
     // Get market info
     const marketResult = await db.query(
@@ -9164,7 +9164,7 @@ app.post('/api/admin/markets/:id/generate-grid', authenticateToken, async (req, 
     const market = marketResult.rows[0];
     const centerLat = parseFloat(market.center_lat);
     const centerLng = parseFloat(market.center_lng);
-    const radiusMiles = parseFloat(market.radius_miles) * coverageMultiplier;
+    const radiusMiles = Math.min(parseFloat(market.radius_miles), maxRadiusMiles);
     
     console.log(`🔷 Generating grid for ${market.market_name}: center(${centerLat}, ${centerLng}), radius ${radiusMiles}mi`);
     
