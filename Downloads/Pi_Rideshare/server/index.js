@@ -9338,6 +9338,204 @@ app.post('/api/admin/markets/generate-all-grids', authenticateToken, async (req,
   }
 });
 
+// Calculate surge for all zones (called every 60 seconds)
+async function calculateSurgeForAllZones() {
+  try {
+    console.log('🔥 Surge Engine: Starting calculation cycle...');
+    
+    // Get all active zones with their states
+    const zonesResult = await db.query(`
+      SELECT sz.id, sz.zone_code, sz.market_id, sz.center_lat, sz.center_lng, sz.polygon_coords
+      FROM surge_zones_v2 sz
+      WHERE sz.is_active = true
+    `);
+    
+    // Get pending rides (last 30 minutes)
+    const ridesResult = await db.query(`
+      SELECT id, pickup_lat, pickup_lng, created_at
+      FROM rides 
+      WHERE status = 'pending'
+      AND created_at > NOW() - INTERVAL '30 minutes'
+    `);
+    
+    const rides = ridesResult.rows.map(r => ({
+      id: r.id,
+      lat: parseFloat(r.pickup_lat),
+      lng: parseFloat(r.pickup_lng),
+      waitMinutes: (Date.now() - new Date(r.created_at).getTime()) / 60000
+    }));
+    
+    // Get available drivers from in-memory map
+    const availableDrivers = Array.from(driverAvailability.entries())
+      .filter(([_, data]) => data.isAvailable && data.lat && data.lng)
+      .map(([id, data]) => ({ id, lat: data.lat, lng: data.lng }));
+    
+    console.log(`🔥 Found ${rides.length} pending rides, ${availableDrivers.length} available drivers`);
+    
+    // Time-based multiplier
+    const hour = new Date().getHours();
+    const dayOfWeek = new Date().getDay();
+    const isPeakHour = [7, 8, 9, 17, 18, 19].includes(hour);
+    const isLateNight = hour >= 22 || hour <= 4;
+    const isWeekendEvening = (dayOfWeek === 0 || dayOfWeek === 6) && hour >= 18;
+    
+    let timeMultiplier = 1.0;
+    if (isPeakHour) timeMultiplier = 1.2;
+    else if (isWeekendEvening) timeMultiplier = 1.25;
+    else if (isLateNight) timeMultiplier = 1.15;
+    
+    // Process each zone
+    let activeZones = 0;
+    const DRIVER_RADIUS_MILES = 1.5;
+    const DRIVER_RADIUS_DEG = DRIVER_RADIUS_MILES * 0.01446;
+    const MIN_RIDES_FOR_SURGE = 7;
+    const MIN_WAIT_MINUTES = 10;
+    
+    for (const zone of zonesResult.rows) {
+      const zoneLat = parseFloat(zone.center_lat);
+      const zoneLng = parseFloat(zone.center_lng);
+      
+      // Count rides in this zone (using polygon bounds approximation)
+      const zoneRides = rides.filter(r => {
+        const latDiff = Math.abs(r.lat - zoneLat);
+        const lngDiff = Math.abs(r.lng - zoneLng);
+        return latDiff < 0.002 && lngDiff < 0.003; // ~0.15 mile box
+      });
+      
+      const demand = zoneRides.length;
+      const avgWaitMinutes = demand > 0 
+        ? zoneRides.reduce((sum, r) => sum + r.waitMinutes, 0) / demand 
+        : 0;
+      
+      // Count drivers within 1.5 miles
+      const nearbyDrivers = availableDrivers.filter(d => {
+        const dist = Math.sqrt(
+          Math.pow(d.lat - zoneLat, 2) + 
+          Math.pow(d.lng - zoneLng, 2)
+        );
+        return dist <= DRIVER_RADIUS_DEG;
+      });
+      
+      const supply = nearbyDrivers.length;
+      
+      // Calculate multiplier
+      let multiplier = 1.0;
+      const factors = [];
+      
+      // Only surge if 7+ rides AND avg wait > 10 min
+      if (demand >= MIN_RIDES_FOR_SURGE && avgWaitMinutes >= MIN_WAIT_MINUTES) {
+        // Base multiplier from supply/demand ratio
+        const ratio = demand / (supply + 1);
+        
+        if (ratio >= 5) multiplier = 2.5;
+        else if (ratio >= 3) multiplier = 2.0;
+        else if (ratio >= 2) multiplier = 1.75;
+        else if (ratio >= 1.5) multiplier = 1.5;
+        else multiplier = 1.25;
+        
+        factors.push(`High Demand (${demand} rides)`);
+        if (supply === 0) factors.push('No Nearby Drivers');
+        else if (supply < 3) factors.push('Low Driver Supply');
+        
+        // Apply time multiplier
+        multiplier *= timeMultiplier;
+        if (isPeakHour) factors.push('Peak Hour');
+        else if (isWeekendEvening) factors.push('Weekend Evening');
+        else if (isLateNight) factors.push('Late Night');
+        
+        // Cap at 5.0
+        multiplier = Math.min(multiplier, 5.0);
+        activeZones++;
+      }
+      
+      // Update zone state
+      await db.query(`
+        UPDATE surge_zone_state 
+        SET current_demand = $1, 
+            current_supply = $2, 
+            avg_wait_minutes = $3,
+            current_multiplier = $4, 
+            factors = $5,
+            updated_at = NOW()
+        WHERE zone_id = $6
+      `, [demand, supply, avgWaitMinutes, multiplier, JSON.stringify(factors), zone.id]);
+      
+      // Log to history if surging (for ML training)
+      if (multiplier > 1.0) {
+        await db.query(`
+          INSERT INTO surge_history (zone_id, demand, supply, multiplier)
+          VALUES ($1, $2, $3, $4)
+        `, [zone.id, demand, supply, multiplier]);
+      }
+    }
+    
+    console.log(`🔥 Surge Engine: ${activeZones} zones with active surge`);
+    
+    // Broadcast to dashboard via Socket.IO
+    io.emit('surge-update', { 
+      activeZones, 
+      timestamp: new Date().toISOString() 
+    });
+    
+  } catch (error) {
+    console.error('❌ Surge calculation error:', error);
+  }
+}
+
+// Run surge calculation every 60 seconds
+setInterval(calculateSurgeForAllZones, 60000);
+
+// Also run once on server start (after 5 seconds to let DB connect)
+setTimeout(calculateSurgeForAllZones, 5000);
+
+// API endpoint to get current surge zones for visualization
+app.get('/api/admin/surge/active-zones', authenticateToken, async (req, res) => {
+  try {
+    const { marketId } = req.query;
+    
+    let query = `
+      SELECT sz.id, sz.zone_code, sz.center_lat, sz.center_lng, sz.polygon_coords,
+             ss.current_demand, ss.current_supply, ss.avg_wait_minutes,
+             ss.current_multiplier, ss.factors, ss.updated_at
+      FROM surge_zones_v2 sz
+      JOIN surge_zone_state ss ON sz.id = ss.zone_id
+      WHERE ss.current_multiplier > 1.0
+    `;
+    
+    const params = [];
+    if (marketId) {
+      query += ` AND sz.market_id = $1`;
+      params.push(marketId);
+    }
+    
+    query += ` ORDER BY ss.current_multiplier DESC`;
+    
+    const result = await db.query(query, params);
+    
+    const zones = result.rows.map(z => ({
+      id: z.id,
+      code: z.zone_code,
+      center: { lat: parseFloat(z.center_lat), lng: parseFloat(z.center_lng) },
+      polygon: z.polygon_coords,
+      demand: z.current_demand,
+      supply: z.current_supply,
+      avgWaitMinutes: parseFloat(z.avg_wait_minutes),
+      multiplier: parseFloat(z.current_multiplier),
+      surgeAmount: ((parseFloat(z.current_multiplier) - 1) * 5).toFixed(2),
+      factors: z.factors || [],
+      updatedAt: z.updated_at
+    }));
+    
+    console.log(`🔷 Active surge zones: ${zones.length}`);
+    res.json({ success: true, zones });
+    
+  } catch (error) {
+    console.error('Get active zones error:', error);
+    res.status(500).json({ error: 'Failed to fetch active zones' });
+  }
+});
+
+
 // Get all time rules
 app.get('/api/admin/surge/time-rules', authenticateToken, async (req, res) => {
   try {
