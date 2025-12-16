@@ -9145,7 +9145,198 @@ app.get('/api/admin/surge/grid', authenticateToken, async (req, res) => {
   }
 });
 
+// Generate surge grid for a single market
+app.post('/api/admin/markets/:id/generate-grid', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { cellSize = 0.15, coverageMultiplier = 1.0 } = req.body; // cellSize in miles
+    
+    // Get market info
+    const marketResult = await db.query(
+      'SELECT id, market_name, center_lat, center_lng, radius_miles FROM markets WHERE id = $1',
+      [id]
+    );
+    
+    if (marketResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Market not found' });
+    }
+    
+    const market = marketResult.rows[0];
+    const centerLat = parseFloat(market.center_lat);
+    const centerLng = parseFloat(market.center_lng);
+    const radiusMiles = parseFloat(market.radius_miles) * coverageMultiplier;
+    
+    console.log(`🔷 Generating grid for ${market.market_name}: center(${centerLat}, ${centerLng}), radius ${radiusMiles}mi`);
+    
+    // Delete existing zones for this market
+    await db.query('DELETE FROM surge_zones_v2 WHERE market_id = $1', [id]);
+    
+    // Calculate grid parameters
+    const hexRadius = cellSize * 0.01446;  // Convert miles to lat degrees
+    const hexWidth = cellSize * 0.01793 / Math.cos(centerLat * Math.PI / 180);  // Adjust for longitude
+    const rowSpacing = hexRadius * 1.5;
+    const colSpacing = hexWidth * Math.sqrt(3) / 2;
+    
+    // Calculate grid size based on radius
+    const gridRadius = Math.ceil(radiusMiles / cellSize);
+    
+    let zonesCreated = 0;
+    
+    for (let row = -gridRadius; row <= gridRadius; row++) {
+      for (let col = -gridRadius; col <= gridRadius; col++) {
+        // Calculate cell center
+        const cellLat = centerLat + (row * rowSpacing);
+        const cellLng = centerLng + (col * colSpacing) + (row % 2 === 1 ? colSpacing / 2 : 0);
+        
+        // Check if within market radius
+        const distFromCenter = Math.sqrt(
+          Math.pow((cellLat - centerLat) / 0.01446, 2) + 
+          Math.pow((cellLng - centerLng) / (0.01793 / Math.cos(centerLat * Math.PI / 180)), 2)
+        );
+        
+        if (distFromCenter > radiusMiles) continue;
+        
+        const marketCode = market.market_name.substring(0, 3).toUpperCase();
+        const cellCode = `${marketCode}-${String(row + gridRadius + 1).padStart(2, '0')}-${String(col + gridRadius + 1).padStart(2, '0')}`;
+        
+        // Create hexagon polygon
+        const hexCoords = [
+          { lat: cellLat + hexRadius, lng: cellLng },
+          { lat: cellLat + (hexRadius * 0.5), lng: cellLng + hexWidth },
+          { lat: cellLat - (hexRadius * 0.5), lng: cellLng + hexWidth },
+          { lat: cellLat - hexRadius, lng: cellLng },
+          { lat: cellLat - (hexRadius * 0.5), lng: cellLng - hexWidth },
+          { lat: cellLat + (hexRadius * 0.5), lng: cellLng - hexWidth }
+        ];
+        
+        const zoneResult = await db.query(`
+          INSERT INTO surge_zones_v2 (market_id, zone_code, polygon_coords, center_lat, center_lng)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id
+        `, [id, cellCode, JSON.stringify(hexCoords), cellLat, cellLng]);
+        
+        // Initialize state
+        await db.query('INSERT INTO surge_zone_state (zone_id) VALUES ($1)', [zoneResult.rows[0].id]);
+        
+        zonesCreated++;
+      }
+    }
+    
+    console.log(`✅ Created ${zonesCreated} zones for ${market.market_name}`);
+    res.json({ 
+      success: true, 
+      market: market.market_name,
+      zonesCreated,
+      cellSize: `${cellSize} miles`,
+      coverageRadius: `${radiusMiles} miles`
+    });
+    
+  } catch (error) {
+    console.error('Generate grid error:', error);
+    res.status(500).json({ error: 'Failed to generate grid' });
+  }
+});
 
+// Generate surge grid for ALL markets
+app.post('/api/admin/markets/generate-all-grids', authenticateToken, async (req, res) => {
+  try {
+    const { cellSize = 0.15 } = req.body;
+    
+    const marketsResult = await db.query('SELECT id, market_name FROM markets WHERE status = $1', ['active']);
+    const results = [];
+    
+    console.log(`🔷 Generating grids for ${marketsResult.rows.length} markets...`);
+    
+    for (const market of marketsResult.rows) {
+      try {
+        // Call the single market generator internally
+        const response = await new Promise((resolve) => {
+          const mockReq = { params: { id: market.id }, body: { cellSize }, user: req.user };
+          const mockRes = {
+            status: () => mockRes,
+            json: (data) => resolve(data)
+          };
+          // Inline generation logic
+          (async () => {
+            const mktResult = await db.query(
+              'SELECT id, market_name, center_lat, center_lng, radius_miles FROM markets WHERE id = $1',
+              [market.id]
+            );
+            const mkt = mktResult.rows[0];
+            const centerLat = parseFloat(mkt.center_lat);
+            const centerLng = parseFloat(mkt.center_lng);
+            const radiusMiles = parseFloat(mkt.radius_miles);
+            
+            await db.query('DELETE FROM surge_zones_v2 WHERE market_id = $1', [market.id]);
+            
+            const hexRadius = cellSize * 0.01446;
+            const hexWidth = cellSize * 0.01793 / Math.cos(centerLat * Math.PI / 180);
+            const rowSpacing = hexRadius * 1.5;
+            const colSpacing = hexWidth * Math.sqrt(3) / 2;
+            const gridRadius = Math.ceil(radiusMiles / cellSize);
+            
+            let zonesCreated = 0;
+            
+            for (let row = -gridRadius; row <= gridRadius; row++) {
+              for (let col = -gridRadius; col <= gridRadius; col++) {
+                const cellLat = centerLat + (row * rowSpacing);
+                const cellLng = centerLng + (col * colSpacing) + (row % 2 === 1 ? colSpacing / 2 : 0);
+                
+                const distFromCenter = Math.sqrt(
+                  Math.pow((cellLat - centerLat) / 0.01446, 2) + 
+                  Math.pow((cellLng - centerLng) / (0.01793 / Math.cos(centerLat * Math.PI / 180)), 2)
+                );
+                
+                if (distFromCenter > radiusMiles) continue;
+                
+                const marketCode = mkt.market_name.substring(0, 3).toUpperCase();
+                const cellCode = `${marketCode}-${String(row + gridRadius + 1).padStart(2, '0')}-${String(col + gridRadius + 1).padStart(2, '0')}`;
+                
+                const hexCoords = [
+                  { lat: cellLat + hexRadius, lng: cellLng },
+                  { lat: cellLat + (hexRadius * 0.5), lng: cellLng + hexWidth },
+                  { lat: cellLat - (hexRadius * 0.5), lng: cellLng + hexWidth },
+                  { lat: cellLat - hexRadius, lng: cellLng },
+                  { lat: cellLat - (hexRadius * 0.5), lng: cellLng - hexWidth },
+                  { lat: cellLat + (hexRadius * 0.5), lng: cellLng - hexWidth }
+                ];
+                
+                const zoneResult = await db.query(`
+                  INSERT INTO surge_zones_v2 (market_id, zone_code, polygon_coords, center_lat, center_lng)
+                  VALUES ($1, $2, $3, $4, $5)
+                  RETURNING id
+                `, [market.id, cellCode, JSON.stringify(hexCoords), cellLat, cellLng]);
+                
+                await db.query('INSERT INTO surge_zone_state (zone_id) VALUES ($1)', [zoneResult.rows[0].id]);
+                zonesCreated++;
+              }
+            }
+            
+            resolve({ market: mkt.market_name, zonesCreated });
+          })();
+        });
+        
+        results.push(response);
+      } catch (err) {
+        results.push({ market: market.market_name, error: err.message });
+      }
+    }
+    
+    const totalZones = results.reduce((sum, r) => sum + (r.zonesCreated || 0), 0);
+    console.log(`✅ Generated ${totalZones} total zones across ${results.length} markets`);
+    
+    res.json({ 
+      success: true, 
+      totalMarkets: results.length,
+      totalZones,
+      results 
+    });
+    
+  } catch (error) {
+    console.error('Generate all grids error:', error);
+    res.status(500).json({ error: 'Failed to generate grids' });
+  }
+});
 
 // Get all time rules
 app.get('/api/admin/surge/time-rules', authenticateToken, async (req, res) => {
