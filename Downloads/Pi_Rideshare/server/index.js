@@ -9339,16 +9339,10 @@ app.post('/api/admin/markets/generate-all-grids', authenticateToken, async (req,
 });
 
 // Calculate surge for all zones (called every 60 seconds)
+// Calculate surge with gradient-based clustering
 async function calculateSurgeForAllZones() {
   try {
     console.log('🔥 Surge Engine: Starting calculation cycle...');
-    
-    // Get all active zones with their states
-    const zonesResult = await db.query(`
-      SELECT sz.id, sz.zone_code, sz.market_id, sz.center_lat, sz.center_lng, sz.polygon_coords
-      FROM surge_zones_v2 sz
-      WHERE sz.is_active = true
-    `);
     
     // Get pending rides (last 30 minutes)
     const ridesResult = await db.query(`
@@ -9365,12 +9359,65 @@ async function calculateSurgeForAllZones() {
       waitMinutes: (Date.now() - new Date(r.created_at).getTime()) / 60000
     }));
     
-    // Get available drivers from in-memory map
+    // Get available drivers
     const availableDrivers = Array.from(driverAvailability.entries())
       .filter(([_, data]) => data.isAvailable && data.lat && data.lng)
       .map(([id, data]) => ({ id, lat: data.lat, lng: data.lng }));
     
     console.log(`🔥 Found ${rides.length} pending rides, ${availableDrivers.length} available drivers`);
+    
+    if (rides.length === 0) {
+      // Reset all zones to no surge
+      await db.query(`UPDATE surge_zone_state SET current_demand = 0, current_supply = 0, current_multiplier = 1.0, factors = '[]', updated_at = NOW()`);
+      io.emit('surge-update', { activeZones: 0, timestamp: new Date().toISOString() });
+      return;
+    }
+    
+    // Step 1: Cluster rides into hotspots
+    const CLUSTER_RADIUS = 0.008; // ~0.5 mile in degrees
+    const clustered = new Set();
+    const hotspots = [];
+    
+    for (let i = 0; i < rides.length; i++) {
+      if (clustered.has(i)) continue;
+      
+      const cluster = [rides[i]];
+      clustered.add(i);
+      
+      // Find all rides within cluster radius
+      for (let j = i + 1; j < rides.length; j++) {
+        if (clustered.has(j)) continue;
+        
+        const inRange = cluster.some(p => {
+          const dist = Math.sqrt(Math.pow(p.lat - rides[j].lat, 2) + Math.pow(p.lng - rides[j].lng, 2));
+          return dist <= CLUSTER_RADIUS;
+        });
+        
+        if (inRange) {
+          cluster.push(rides[j]);
+          clustered.add(j);
+        }
+      }
+      
+      if (cluster.length >= 3) {
+        // Calculate centroid
+        const centroid = {
+          lat: cluster.reduce((sum, p) => sum + p.lat, 0) / cluster.length,
+          lng: cluster.reduce((sum, p) => sum + p.lng, 0) / cluster.length
+        };
+        
+        const avgWait = cluster.reduce((sum, r) => sum + r.waitMinutes, 0) / cluster.length;
+        
+        hotspots.push({
+          center: centroid,
+          rideCount: cluster.length,
+          avgWaitMinutes: avgWait,
+          rides: cluster
+        });
+      }
+    }
+    
+    console.log(`🔥 Found ${hotspots.length} demand hotspots`);
     
     // Time-based multiplier
     const hour = new Date().getHours();
@@ -9380,100 +9427,129 @@ async function calculateSurgeForAllZones() {
     const isWeekendEvening = (dayOfWeek === 0 || dayOfWeek === 6) && hour >= 18;
     
     let timeMultiplier = 1.0;
-    if (isPeakHour) timeMultiplier = 1.2;
-    else if (isWeekendEvening) timeMultiplier = 1.25;
-    else if (isLateNight) timeMultiplier = 1.15;
+    let timeFactor = null;
+    if (isPeakHour) { timeMultiplier = 1.2; timeFactor = 'Peak Hour'; }
+    else if (isWeekendEvening) { timeMultiplier = 1.25; timeFactor = 'Weekend Evening'; }
+    else if (isLateNight) { timeMultiplier = 1.15; timeFactor = 'Late Night'; }
     
-    // Process each zone
-    let activeZones = 0;
-    const DRIVER_RADIUS_MILES = 1.5;
-    const DRIVER_RADIUS_DEG = DRIVER_RADIUS_MILES * 0.01446;
+    // Step 2: Reset all zones first
+    await db.query(`UPDATE surge_zone_state SET current_demand = 0, current_supply = 0, avg_wait_minutes = 0, current_multiplier = 1.0, factors = '[]', updated_at = NOW()`);
+    
+    // Step 3: For each hotspot, apply gradient surge to nearby zones
+    const DRIVER_RADIUS = 0.022; // 1.5 miles in degrees
+    const SURGE_RADIUS = 0.012; // ~0.8 mile - zones within this get surge
     const MIN_RIDES_FOR_SURGE = 7;
     const MIN_WAIT_MINUTES = 10;
     
-    for (const zone of zonesResult.rows) {
-      const zoneLat = parseFloat(zone.center_lat);
-      const zoneLng = parseFloat(zone.center_lng);
+    let activeZones = 0;
+    
+    for (const hotspot of hotspots) {
+      // Skip if doesn't meet threshold
+      if (hotspot.rideCount < MIN_RIDES_FOR_SURGE || hotspot.avgWaitMinutes < MIN_WAIT_MINUTES) {
+        continue;
+      }
       
-      // Count rides in this zone (using polygon bounds approximation)
-      const zoneRides = rides.filter(r => {
-        const latDiff = Math.abs(r.lat - zoneLat);
-        const lngDiff = Math.abs(r.lng - zoneLng);
-        return latDiff < 0.002 && lngDiff < 0.003; // ~0.15 mile box
-      });
-      
-      const demand = zoneRides.length;
-      const avgWaitMinutes = demand > 0 
-        ? zoneRides.reduce((sum, r) => sum + r.waitMinutes, 0) / demand 
-        : 0;
-      
-      // Count drivers within 1.5 miles
+      // Count drivers near hotspot
       const nearbyDrivers = availableDrivers.filter(d => {
-        const dist = Math.sqrt(
-          Math.pow(d.lat - zoneLat, 2) + 
-          Math.pow(d.lng - zoneLng, 2)
+        const dist = Math.sqrt(Math.pow(d.lat - hotspot.center.lat, 2) + Math.pow(d.lng - hotspot.center.lng, 2));
+        return dist <= DRIVER_RADIUS;
+      }).length;
+      
+      // Base multiplier from demand/supply ratio
+      const ratio = hotspot.rideCount / (nearbyDrivers + 1);
+      let baseMultiplier = 1.0;
+      
+      if (ratio >= 8) baseMultiplier = 3.0;
+      else if (ratio >= 5) baseMultiplier = 2.5;
+      else if (ratio >= 3) baseMultiplier = 2.0;
+      else if (ratio >= 2) baseMultiplier = 1.75;
+      else if (ratio >= 1.5) baseMultiplier = 1.5;
+      else baseMultiplier = 1.25;
+      
+      // Apply time multiplier
+      baseMultiplier *= timeMultiplier;
+      baseMultiplier = Math.min(baseMultiplier, 5.0);
+      
+      // Find all zones within surge radius and apply gradient
+      const zonesInRange = await db.query(`
+        SELECT sz.id, sz.zone_code, sz.center_lat, sz.center_lng
+        FROM surge_zones_v2 sz
+        WHERE sz.is_active = true
+        AND ABS(sz.center_lat - $1) < $3
+        AND ABS(sz.center_lng - $2) < $3
+      `, [hotspot.center.lat, hotspot.center.lng, SURGE_RADIUS]);
+      
+      for (const zone of zonesInRange.rows) {
+        const zoneLat = parseFloat(zone.center_lat);
+        const zoneLng = parseFloat(zone.center_lng);
+        
+        // Calculate distance from hotspot center
+        const distFromCenter = Math.sqrt(
+          Math.pow(zoneLat - hotspot.center.lat, 2) + 
+          Math.pow(zoneLng - hotspot.center.lng, 2)
         );
-        return dist <= DRIVER_RADIUS_DEG;
-      });
-      
-      const supply = nearbyDrivers.length;
-      
-      // Calculate multiplier
-      let multiplier = 1.0;
-      const factors = [];
-      
-      // Only surge if 7+ rides AND avg wait > 10 min
-      if (demand >= MIN_RIDES_FOR_SURGE && avgWaitMinutes >= MIN_WAIT_MINUTES) {
-        // Base multiplier from supply/demand ratio
-        const ratio = demand / (supply + 1);
         
-        if (ratio >= 5) multiplier = 2.5;
-        else if (ratio >= 3) multiplier = 2.0;
-        else if (ratio >= 2) multiplier = 1.75;
-        else if (ratio >= 1.5) multiplier = 1.5;
-        else multiplier = 1.25;
+        // Gradient falloff: closer = higher multiplier
+        const distanceRatio = distFromCenter / SURGE_RADIUS;
+        const gradientMultiplier = baseMultiplier - ((baseMultiplier - 1.0) * distanceRatio * 0.7);
         
-        factors.push(`High Demand (${demand} rides)`);
-        if (supply === 0) factors.push('No Nearby Drivers');
-        else if (supply < 3) factors.push('Low Driver Supply');
+        // Count actual rides in this specific zone
+        const ridesInZone = hotspot.rides.filter(r => {
+          const latDiff = Math.abs(r.lat - zoneLat);
+          const lngDiff = Math.abs(r.lng - zoneLng);
+          return latDiff < 0.003 && lngDiff < 0.004;
+        }).length;
         
-        // Apply time multiplier
-        multiplier *= timeMultiplier;
-        if (isPeakHour) factors.push('Peak Hour');
-        else if (isWeekendEvening) factors.push('Weekend Evening');
-        else if (isLateNight) factors.push('Late Night');
+        // Boost zones with more rides
+        let finalMultiplier = gradientMultiplier;
+        if (ridesInZone >= 5) finalMultiplier = Math.min(finalMultiplier * 1.15, 5.0);
+        else if (ridesInZone >= 3) finalMultiplier = Math.min(finalMultiplier * 1.08, 5.0);
         
-        // Cap at 5.0
-        multiplier = Math.min(multiplier, 5.0);
+        // Ensure minimum surge threshold
+        if (finalMultiplier < 1.25) continue;
+        
+        const factors = [];
+        factors.push(`${hotspot.rideCount} rides nearby`);
+        if (nearbyDrivers === 0) factors.push('No drivers');
+        else if (nearbyDrivers < 3) factors.push('Low supply');
+        if (timeFactor) factors.push(timeFactor);
+        if (ridesInZone >= 3) factors.push(`${ridesInZone} in zone`);
+        
+        // Update zone state (keep highest if overlapping hotspots)
+        await db.query(`
+          UPDATE surge_zone_state 
+          SET current_demand = GREATEST(current_demand, $1),
+              current_supply = $2,
+              avg_wait_minutes = GREATEST(avg_wait_minutes, $3),
+              current_multiplier = GREATEST(current_multiplier, $4),
+              factors = $5,
+              updated_at = NOW()
+          WHERE zone_id = $6
+          AND current_multiplier < $4
+        `, [ridesInZone, nearbyDrivers, hotspot.avgWaitMinutes, finalMultiplier, JSON.stringify(factors), zone.id]);
+        
         activeZones++;
       }
-      
-      // Update zone state
+    }
+    
+    // Log to history for ML training
+    const surgeZones = await db.query(`
+      SELECT zone_id, current_demand, current_supply, current_multiplier 
+      FROM surge_zone_state 
+      WHERE current_multiplier > 1.0
+    `);
+    
+    for (const z of surgeZones.rows) {
       await db.query(`
-        UPDATE surge_zone_state 
-        SET current_demand = $1, 
-            current_supply = $2, 
-            avg_wait_minutes = $3,
-            current_multiplier = $4, 
-            factors = $5,
-            updated_at = NOW()
-        WHERE zone_id = $6
-      `, [demand, supply, avgWaitMinutes, multiplier, JSON.stringify(factors), zone.id]);
-      
-      // Log to history if surging (for ML training)
-      if (multiplier > 1.0) {
-        await db.query(`
-          INSERT INTO surge_history (zone_id, demand, supply, multiplier)
-          VALUES ($1, $2, $3, $4)
-        `, [zone.id, demand, supply, multiplier]);
-      }
+        INSERT INTO surge_history (zone_id, demand, supply, multiplier)
+        VALUES ($1, $2, $3, $4)
+      `, [z.zone_id, z.current_demand, z.current_supply, z.current_multiplier]);
     }
     
     console.log(`🔥 Surge Engine: ${activeZones} zones with active surge`);
     
-    // Broadcast to dashboard via Socket.IO
     io.emit('surge-update', { 
-      activeZones, 
+      activeZones: surgeZones.rows.length, 
       timestamp: new Date().toISOString() 
     });
     
