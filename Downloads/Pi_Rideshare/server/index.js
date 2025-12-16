@@ -9653,7 +9653,7 @@ app.get('/api/admin/surge/active-zones', authenticateToken, async (req, res) => 
     const { marketId } = req.query;
     
     let query = `
-      SELECT sz.id, sz.zone_code, sz.center_lat, sz.center_lng, sz.polygon_coords,
+      SELECT sz.id, sz.zone_code, sz.zone_type, sz.center_lat, sz.center_lng, sz.polygon_coords,
              ss.current_demand, ss.current_supply, ss.avg_wait_minutes,
              ss.current_multiplier, ss.factors, ss.updated_at
       FROM surge_zones_v2 sz
@@ -9674,6 +9674,7 @@ app.get('/api/admin/surge/active-zones', authenticateToken, async (req, res) => 
     const zones = result.rows.map(z => ({
       id: z.id,
       code: z.zone_code,
+      zoneType: z.zone_type || 'city',
       center: { lat: parseFloat(z.center_lat), lng: parseFloat(z.center_lng) },
       polygon: z.polygon_coords,
       demand: z.current_demand,
