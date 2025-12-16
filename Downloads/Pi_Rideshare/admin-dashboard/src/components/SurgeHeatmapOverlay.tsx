@@ -26,7 +26,6 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
 }) => {
   const overlayRef = useRef<google.maps.GroundOverlay | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const clearOverlays = () => {
     if (overlayRef.current) {
@@ -42,21 +41,22 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
     clearOverlays();
     if (!gridCells || gridCells.length === 0) return;
 
-    // Find hotspots (zones with multiplier >= 2.0 for labels)
-    const hotspots: { center: { lat: number; lng: number }; surgeAmount: string; multiplier: number }[] = [];
-    const sorted = [...gridCells].filter(z => z.multiplier >= 2.0).sort((a, b) => b.multiplier - a.multiplier);
+    // Find labels - include outer edges (lower threshold)
+    const labelZones: { center: { lat: number; lng: number }; surgeAmount: string; multiplier: number }[] = [];
+    const sorted = [...gridCells].filter(z => z.multiplier >= 1.5).sort((a, b) => b.multiplier - a.multiplier);
     
     for (const zone of sorted) {
-      const tooClose = hotspots.some(h => {
+      // Closer spacing for more labels
+      const tooClose = labelZones.some(h => {
         const dist = Math.sqrt(
           Math.pow(h.center.lat - zone.center.lat, 2) +
           Math.pow(h.center.lng - zone.center.lng, 2)
         );
-        return dist < 0.015;
+        return dist < 0.008; // Closer spacing = more labels
       });
 
       if (!tooClose) {
-        hotspots.push({
+        labelZones.push({
           center: zone.center,
           surgeAmount: zone.surgeAmount,
           multiplier: zone.multiplier
@@ -64,43 +64,43 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
       }
     }
 
-    // Calculate bounds
+    // Calculate bounds with padding
     const allZones = gridCells.filter(z => z.multiplier >= 1.25);
     if (allZones.length === 0) return;
 
     const lats = allZones.map(z => z.center.lat);
     const lngs = allZones.map(z => z.center.lng);
-    const minLat = Math.min(...lats) - 0.01;
-    const maxLat = Math.max(...lats) + 0.01;
-    const minLng = Math.min(...lngs) - 0.01;
-    const maxLng = Math.max(...lngs) + 0.01;
+    const padding = 0.02;
+    const minLat = Math.min(...lats) - padding;
+    const maxLat = Math.max(...lats) + padding;
+    const minLng = Math.min(...lngs) - padding;
+    const maxLng = Math.max(...lngs) + padding;
 
-    // Create canvas for smooth heatmap
+    // Create high-res canvas
     const canvas = document.createElement('canvas');
-    const width = 800;
-    const height = 800;
+    const width = 1200;
+    const height = 1200;
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear with transparent
     ctx.clearRect(0, 0, width, height);
 
-    // Draw each zone as a soft radial gradient
+    // Draw overlapping gradients
     for (const zone of allZones) {
       const x = ((zone.center.lng - minLng) / (maxLng - minLng)) * width;
       const y = ((maxLat - zone.center.lat) / (maxLat - minLat)) * height;
       
-      const intensity = (zone.multiplier - 1.0) / 2.0; // 0 to 1
-      const radius = 25 + (intensity * 15);
+      const intensity = Math.min(1, (zone.multiplier - 1.0) / 1.5);
+      const radius = 80 + (intensity * 40);
 
       const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
       
-      // Purple gradient
-      const alpha = Math.min(0.6, intensity * 0.8);
-      gradient.addColorStop(0, `rgba(124, 58, 237, ${alpha})`);
-      gradient.addColorStop(0.5, `rgba(139, 92, 246, ${alpha * 0.7})`);
+      const alpha = 0.25 + (intensity * 0.35);
+      gradient.addColorStop(0, `rgba(88, 28, 135, ${alpha})`);
+      gradient.addColorStop(0.4, `rgba(124, 58, 237, ${alpha * 0.8})`);
+      gradient.addColorStop(0.7, `rgba(139, 92, 246, ${alpha * 0.5})`);
       gradient.addColorStop(1, `rgba(167, 139, 250, 0)`);
 
       ctx.fillStyle = gradient;
@@ -108,11 +108,6 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
     }
-
-    // Apply blur for smoothness
-    ctx.filter = 'blur(8px)';
-    const imageData = ctx.getImageData(0, 0, width, height);
-    ctx.putImageData(imageData, 0, 0);
 
     // Create ground overlay
     const bounds = new google.maps.LatLngBounds(
@@ -123,26 +118,26 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
     overlayRef.current = new google.maps.GroundOverlay(
       canvas.toDataURL(),
       bounds,
-      { opacity: 0.85 }
+      { opacity: 0.9 }
     );
     overlayRef.current.setMap(map);
 
-    // Add ONE label per hotspot (only high-surge centers)
-    for (const hotspot of hotspots) {
+    // Labels with proportional font size
+    for (const zone of labelZones) {
+      // Smaller font - scales with multiplier
+      const fontSize = zone.multiplier >= 2.5 ? '11px' : zone.multiplier >= 2.0 ? '10px' : '9px';
+      
       const marker = new google.maps.Marker({
-        position: hotspot.center,
+        position: zone.center,
         map: map,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 0
-        },
+        icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0 },
         label: {
-          text: `+$${hotspot.surgeAmount}`,
+          text: `+$${zone.surgeAmount}`,
           color: 'white',
-          fontSize: '14px',
+          fontSize: fontSize,
           fontWeight: 'bold'
         },
-        zIndex: 1000
+        zIndex: Math.floor(zone.multiplier * 100)
       });
       markersRef.current.push(marker);
     }
