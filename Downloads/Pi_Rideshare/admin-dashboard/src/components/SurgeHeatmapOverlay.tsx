@@ -41,12 +41,13 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
     clearOverlays();
     if (!gridCells || gridCells.length === 0) return;
 
-    // Separate airport zones from city zones for label logic
+    // Separate airport zones from city zones
     const airportZones = gridCells.filter(z => z.code.match(/^[A-Z]{3}-/));
     const cityZones = gridCells.filter(z => !z.code.match(/^[A-Z]{3}-/));
 
-    // City labels - include outer edges (lower threshold, closer spacing)
     const labelZones: { center: { lat: number; lng: number }; surgeAmount: string; multiplier: number }[] = [];
+
+    // City labels - closer spacing for more labels on edges
     const sortedCity = [...cityZones].filter(z => z.multiplier >= 1.5).sort((a, b) => b.multiplier - a.multiplier);
     
     for (const zone of sortedCity) {
@@ -55,7 +56,7 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
           Math.pow(h.center.lat - zone.center.lat, 2) +
           Math.pow(h.center.lng - zone.center.lng, 2)
         );
-        return dist < 0.005;
+        return dist < 0.004; // Smaller = more labels
       });
 
       if (!tooClose) {
@@ -67,42 +68,56 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
       }
     }
 
-    // Airport labels - max 3 per airport
+    // Airport labels - exactly 3: center + 2 edges
     const airportCodes = [...new Set(airportZones.map(z => z.code.split('-')[0]))];
     
     for (const code of airportCodes) {
-      const cells = airportZones.filter(z => z.code.startsWith(code + '-') && z.multiplier >= 1.5);
+      const cells = airportZones.filter(z => z.code.startsWith(code + '-') && z.multiplier >= 1.25);
       if (cells.length === 0) continue;
       
       const sorted = [...cells].sort((a, b) => b.multiplier - a.multiplier);
+      const centerZone = sorted[0];
       
-      // Center label
+      // 1. Center label (rideshare lot)
       labelZones.push({
-        center: sorted[0].center,
-        surgeAmount: sorted[0].surgeAmount,
-        multiplier: sorted[0].multiplier
+        center: centerZone.center,
+        surgeAmount: centerZone.surgeAmount,
+        multiplier: centerZone.multiplier
       });
       
-      // Find 2 edge labels ~1.5 miles from center
-      const centerLat = sorted[0].center.lat;
-      const centerLng = sorted[0].center.lng;
-      let edgeCount = 0;
+      // 2 & 3. Find edge labels ~1.5 miles out, opposite directions
+      const edgeLabels: typeof labelZones = [];
       
-      for (const cell of sorted.slice(1)) {
-        if (edgeCount >= 2) break;
+      for (const cell of sorted) {
+        if (edgeLabels.length >= 2) break;
+        
         const dist = Math.sqrt(
-          Math.pow(cell.center.lat - centerLat, 2) +
-          Math.pow(cell.center.lng - centerLng, 2)
+          Math.pow(cell.center.lat - centerZone.center.lat, 2) +
+          Math.pow(cell.center.lng - centerZone.center.lng, 2)
         );
-        if (dist >= 0.015 && dist <= 0.025) {
-          labelZones.push({
-            center: cell.center,
-            surgeAmount: cell.surgeAmount,
-            multiplier: cell.multiplier
+        
+        // 1.5 miles = ~0.022 degrees
+        if (dist >= 0.018 && dist <= 0.028) {
+          // Check not too close to other edge labels
+          const tooCloseToEdge = edgeLabels.some(e => {
+            const d = Math.sqrt(
+              Math.pow(e.center.lat - cell.center.lat, 2) +
+              Math.pow(e.center.lng - cell.center.lng, 2)
+            );
+            return d < 0.015;
           });
-          edgeCount++;
+          
+          if (!tooCloseToEdge) {
+            edgeLabels.push({
+              center: cell.center,
+              surgeAmount: cell.surgeAmount,
+              multiplier: cell.multiplier
+            });
+          }
         }
       }
+      
+      labelZones.push(...edgeLabels);
     }
 
     // Calculate bounds
@@ -128,7 +143,7 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
 
     ctx.clearRect(0, 0, width, height);
 
-    // Draw overlapping gradients - lower alpha so roads show through
+    // Draw overlapping gradients
     for (const zone of allZones) {
       const x = ((zone.center.lng - minLng) / (maxLng - minLng)) * width;
       const y = ((maxLat - zone.center.lat) / (maxLat - minLat)) * height;
@@ -138,7 +153,6 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
 
       const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
       
-      // Lower alpha values for transparency
       const alpha = 0.18 + (intensity * 0.25);
       gradient.addColorStop(0, `rgba(88, 28, 135, ${alpha})`);
       gradient.addColorStop(0.4, `rgba(124, 58, 237, ${alpha * 0.8})`);
@@ -160,11 +174,11 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
     overlayRef.current = new google.maps.GroundOverlay(
       canvas.toDataURL(),
       bounds,
-      { opacity: 0.55 }
+      { opacity: 0.75 }
     );
     overlayRef.current.setMap(map);
 
-    // Labels with proportional font size
+    // Render all labels
     for (const zone of labelZones) {
       const fontSize = zone.multiplier >= 2.5 ? '11px' : zone.multiplier >= 2.0 ? '10px' : '9px';
       
