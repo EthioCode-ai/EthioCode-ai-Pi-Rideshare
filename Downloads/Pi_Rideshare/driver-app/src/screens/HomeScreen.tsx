@@ -16,6 +16,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import driverService from '../services/driver.service';
 import socketService from '../services/socket.service';
 import RideRequestModal, { RideRequestData } from '../components/RideRequestModal';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native'
+import { StackNavigationProp } from '@react-navigation/stack';
+import { MainStackParamList } from '../navigation/RootNavigator';
+import { ActiveRide, TripStatus } from '../types/ride.types';
+import { API_BASE_URL } from '../config/api.config';
+import SurgeOverlay from '../components/SurgeOverlay';
 
 // Performance data interface
 interface PerformanceData {
@@ -50,6 +56,8 @@ const CAR_ROTATION_OFFSET = 90;
 
 const HomeScreen: React.FC = () => {
   const [location, setLocation] = useState<any>(null);
+  const locationRef = useRef<any>(null);
+  const headingRef = useRef<number>(0);
   const [isOnline, setIsOnline] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [rideRequest, setRideRequest] = useState<RideRequestData | null>(null);
@@ -57,13 +65,22 @@ const HomeScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [heading, setHeading] = useState<number>(0);
-  const [performanceExpanded, setPerformanceExpanded] = useState(true);
+  const [performanceExpanded, setPerformanceExpanded] = useState(false);
   const [headerExpanded, setHeaderExpanded] = useState(false);
   const [rideState, setRideState] = useState<RideState>('waiting');
   const [riderName, setRiderName] = useState<string | null>(null);
+  const [surgeZones, setSurgeZones] = useState<any[]>([]);
   const [bannerTextIndex, setBannerTextIndex] = useState(0);
-  const [performanceData, setPerformanceData] = useState<PerformanceData>({
-    todayEarnings: 0,
+  const navigation = useNavigation<StackNavigationProp<MainStackParamList>>();
+  const route = useRoute<RouteProp<MainStackParamList, 'Home'>>();
+  const [completedTripModal, setCompletedTripModal] = useState<{
+  visible: boolean;
+  fare: number;
+  riderName: string;
+  distance: number;
+} | null>(null);
+    const [performanceData, setPerformanceData] = useState<PerformanceData>({
+  todayEarnings: 0,
     trips: 0,
     onlineHours: 0,
     miles: 0,
@@ -78,9 +95,44 @@ const HomeScreen: React.FC = () => {
 
   useEffect(() => {
     console.log('HomeScreen mounted! Initializing location...');
+    
     initializeLocation();
     fetchPerformanceData();
   }, []);
+
+  // Handle completed trip from ActiveRideScreen
+useEffect(() => {
+   if (route.params?.completedTrip) {
+    const trip = route.params.completedTrip;
+    
+    // Keep driver online
+    if (route.params?.stayOnline) {
+      setIsOnline(true);
+    }
+    
+    // Show modal
+    setCompletedTripModal({
+      visible: true,
+      fare: trip.fare,
+      riderName: trip.riderName,
+      distance: trip.distance,
+    });
+    
+    // Update performance data
+    setPerformanceData(prev => ({
+      ...prev,
+      todayEarnings: prev.todayEarnings + trip.fare,
+      trips: prev.trips + 1,
+      miles: prev.miles + trip.distance,
+      lastRide: trip.fare,
+    }));
+    
+    // Auto-dismiss modal after 3 seconds
+    setTimeout(() => {
+      setCompletedTripModal(null);
+    }, 3000);
+  }
+}, [route.params?.completedTrip]);
 
   useEffect(() => {
     // Animate header expansion/collapse
@@ -90,6 +142,8 @@ const HomeScreen: React.FC = () => {
       useNativeDriver: false,
     }).start();
   }, [headerExpanded]);
+
+  
     // Load user data from storage
   useEffect(() => {
   const loadUser = async () => {
@@ -163,6 +217,8 @@ useEffect(() => {
     });
   }
   
+
+
   // Cleanup on unmount
   return () => {
     if (locationIntervalRef.current) {
@@ -171,6 +227,37 @@ useEffect(() => {
     }
   };
 }, [socketConnected, user?.id]);
+
+// Fetch surge zones for heatmap overlay
+const fetchSurgeZones = async () => {
+  try {
+    const token = await AsyncStorage.getItem('authToken');
+    const response = await fetch(`${API_BASE_URL}/api/admin/surge/active-zones`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success) {
+        setSurgeZones(data.zones || []);
+        console.log(`🔥 Loaded ${data.zones?.length || 0} surge zones`);
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching surge zones:', error);
+  }
+};
+// Listen to Socket.IO surge updates for real-time sync
+useEffect(() => {
+  if (socketConnected) {
+    socketService.onSurgeUpdate(() => {
+      console.log('🔥 Surge update received, refreshing...');
+      fetchSurgeZones();
+    });
+  }
+  return () => {
+    socketService.offSurgeUpdate();
+  };
+}, [socketConnected]);
 
   // Fetch performance data from backend
   const fetchPerformanceData = async () => {
@@ -246,6 +333,7 @@ useEffect(() => {
           };
          
           setLocation(newLoc);
+          locationRef.current = newLoc;
          
           // Update heading regardless of online status (for navigation)
           if (newLocation.coords.heading !== null) {
@@ -262,7 +350,7 @@ useEffect(() => {
               },
               heading: newLocation.coords.heading,
               pitch: 60,
-              zoom: 17,
+              zoom: 19,
             }, { duration: 500 });
           }
         }
@@ -300,15 +388,16 @@ const toggleOnlineStatus = async () => {
       
       // 3. Start location broadcast interval (every 5 seconds)
       locationIntervalRef.current = setInterval(() => {
-        if (location) {
-          socketService.sendLocationUpdate({
-            driverId: user?.id || '',
-            latitude: location.latitude,
-            longitude: location.longitude,
-            heading: heading,
-            speed: 0,
-          });
-        }
+      console.log('📡 Interval tick - locationRef:', locationRef.current?.latitude, locationRef.current?.longitude);
+      if (locationRef.current) {
+       socketService.sendLocationUpdate({
+      driverId: user?.id || '',
+      latitude: locationRef.current.latitude,
+      longitude: locationRef.current.longitude,
+      heading: headingRef.current,
+      speed: 0,
+      });
+      }
       }, 5000);
       
       // 4. Update UI
@@ -325,7 +414,7 @@ const toggleOnlineStatus = async () => {
           },
           heading: heading,
           pitch: 60,
-          zoom: 17,
+          zoom: 19,
         }, { duration: 1000 });
       }
       
@@ -372,14 +461,66 @@ const toggleOnlineStatus = async () => {
   }
 };
 
-// Handle ride request accept
-const handleAcceptRide = (rideId: string) => {
-  console.log('✅ Accepting ride:', rideId);
-  socketService.acceptRide(user?.id || '', rideId);
+  // Handle ride request accept
+  const handleAcceptRide = (rideId: string, routeData: any) => {
+    console.log('✅ Accepting ride:', rideId);
+    
+    if (!rideRequest) {
+      console.error('No ride request data available');
+      return;
+    }
+    
+      
+    // Transform RideRequestData → ActiveRide
+    const activeRide: ActiveRide = {
+      rideId: rideRequest.rideId,
+      status: 'en_route_to_pickup' as TripStatus,
+      rider: {
+        id: rideRequest.riderId,
+        name: rideRequest.riderName || 'Rider',
+        rating: rideRequest.riderRating || 4.5,
+        phone: undefined,
+        photoUrl: undefined,
+      },
+      pickup: {
+        address: rideRequest.pickup.address,
+        lat: rideRequest.pickup.lat || 0,
+        lng: rideRequest.pickup.lng || 0,
+      },
+      destination: {
+        address: rideRequest.destination.address,
+        lat: rideRequest.destination.lat || 0,
+        lng: rideRequest.destination.lng || 0,
+      },
+      fare: {
+      estimated: rideRequest.estimatedFare,
+      currency: 'USD',
+      surgeMultiplier: rideRequest.surgeMultiplier,
+    },
+    distance: {
+      toPickup: {
+        miles: 0,
+        minutes: 0,
+      },
+      toDestination: {
+        miles: rideRequest.estimatedDistance || 0,
+        minutes: rideRequest.estimatedDuration || 0,
+      },
+    },
+    acceptedAt: new Date().toISOString(),
+  };
+  
+  // Clear the modal
   setRideRequest(null);
-  // TODO: Navigate to ActiveRideScreen (Phase 2.5)
-  Alert.alert('Ride Accepted', 'Navigate to pickup location!');
-};
+  
+// Navigate to ActiveRideScreen
+navigation.navigate('ActiveRide', { ride: activeRide, routeData });
+
+ // Emit acceptance via socket AFTER navigation
+socketService.acceptRide(user?.id || '', rideId);
+ };  
+
+
 
 // Handle ride request decline
 const handleDeclineRide = (rideId: string) => {
@@ -475,23 +616,25 @@ const handleDeclineRide = (rideId: string) => {
           provider={PROVIDER_GOOGLE}
           style={styles.map}
           customMapStyle={[
-            { "elementType": "geometry", "stylers": [{ "color": "#ebebeb" }] },
-            { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9d6df" }] },
-            { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
-            { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#d4d4d4" }] },
-            { "elementType": "labels.text.fill", "stylers": [{ "color": "#6b6b6b" }] },
-            { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] }
+              { "elementType": "geometry", "stylers": [{ "color": "#ebebeb" }] },
+              { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9d6df" }] },
+              { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
+              { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#d4d4d4" }] },
+              { "elementType": "labels.text.fill", "stylers": [{ "color": "#6b6b6b" }] },
+              { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] },
+              { "featureType": "poi", "stylers": [{ "visibility": "on" }] },
+              { "featureType": "transit", "stylers": [{ "visibility": "off" }] }
            ]}
           initialRegion={{
             latitude: location.latitude,
             longitude: location.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
           }}
           showsUserLocation={false}
           showsMyLocationButton={false}
           showsCompass={true}
-          showsTraffic={true}
+          showsTraffic={false}
           zoomEnabled={true}           // ← ADD THIS
           scrollEnabled={true}          // ← ADD THIS
           zoomControlEnabled={true}     // ← ADD THIS (Android only)
@@ -502,6 +645,7 @@ const handleDeclineRide = (rideId: string) => {
           {/* CRITICAL: Car marker rotates to match heading (direction of travel) */}
           {/* Map ALSO rotates by same amount, so car appears to point UP on screen */}
           {/* Car image front points UP = 0°, adjust CAR_ROTATION_OFFSET if needed */}
+          <SurgeOverlay zones={surgeZones} />
          <Marker
   coordinate={{
     latitude: location.latitude,
@@ -600,7 +744,7 @@ const handleDeclineRide = (rideId: string) => {
               activeOpacity={0.7}
             >
               <Text style={styles.performanceTitle}>
-                {performanceExpanded ? "Today's Performance" : `${formatCurrency(performanceData.todayEarnings)} • ${performanceData.trips} trips • ${performanceData.miles} mi`}
+               {performanceExpanded ? "Today's Performance" : `${formatCurrency(performanceData.todayEarnings)} • ${performanceData.trips} trips • ${performanceData.miles.toFixed(1)} mi`}
               </Text>
               <Text style={styles.performanceToggle}>
                 {performanceExpanded ? '▲' : '▼'}
@@ -623,7 +767,7 @@ const handleDeclineRide = (rideId: string) => {
                     <Text style={styles.statLabel}>Online</Text>
                   </View>
                   <View style={styles.statItem}>
-                    <Text style={styles.statValue}>{performanceData.miles}</Text>
+                    <Text style={styles.statValue}>{performanceData.miles.toFixed(1)}</Text>
                     <Text style={styles.statLabel}>Miles</Text>
                   </View>
                   <View style={styles.statItem}>
@@ -657,21 +801,21 @@ const handleDeclineRide = (rideId: string) => {
           riderId: 'test-rider',
           riderName: 'Tolbert Dunkin',
           riderRating: 4.8,
-          pickup: {
-            address: '3804 SW High Point Ave, Bentonville, AR',
-            lat: 36.36878,
-            lng: -94.25403,
-          },
-          destination: {
-            address: 'XNA Airport, Bentonville, AR',
-            lat: 36.28078,
-            lng: -94.30452,
-          },
-          estimatedFare: 25.50,
-          estimatedDistance: 12.5,
-          estimatedDuration: 18,
-          surgeMultiplier: 1.2,
-        });
+         pickup: {
+          address: 'Onyx Coffee Shop, SE 2nd St, Bentonville, AR',
+          lat: 36.3731,
+          lng: -94.2093,
+       },
+         destination: {
+          address: '21C Museum Hotel, Bentonville, AR',
+          lat: 36.3741,
+          lng: -94.2081,
+       },
+          estimatedFare: 8.50,
+          estimatedDistance: 0.3,
+          estimatedDuration: 2,
+          surgeMultiplier: 1.0,
+  });
       }}
     >
       <Text style={styles.floatingButtonText}>🧪</Text>
@@ -711,7 +855,7 @@ const handleDeclineRide = (rideId: string) => {
       
    </TouchableWithoutFeedback>
 
-  {/* Ride Request Modal */}
+    {/* Ride Request Modal */}
   <RideRequestModal
     visible={rideRequest !== null}
     request={rideRequest}
@@ -719,6 +863,22 @@ const handleDeclineRide = (rideId: string) => {
     onAccept={handleAcceptRide}
     onDecline={handleDeclineRide}
   />
+  
+  {/* Trip Completed Modal */}
+  {completedTripModal && (
+    <View style={styles.tripCompletedOverlay}>
+      <View style={styles.tripCompletedModal}>
+        <Text style={styles.tripCompletedEmoji}>✅</Text>
+        <Text style={styles.tripCompletedTitle}>Trip Completed!</Text>
+        <Text style={styles.tripCompletedFare}>
+          ${completedTripModal.fare.toFixed(2)}
+        </Text>
+        <Text style={styles.tripCompletedRider}>
+          {completedTripModal.riderName} • {completedTripModal.distance.toFixed(1)} mi
+        </Text>
+      </View>
+    </View>
+  )}
 </>
 );
 };
@@ -772,6 +932,50 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
  
+// Trip Completed Modal
+  tripCompletedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tripCompletedModal: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 32,
+    alignItems: 'center',
+    marginHorizontal: 32,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  tripCompletedEmoji: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  tripCompletedTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  tripCompletedFare: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#10B981',
+    marginBottom: 8,
+  },
+  tripCompletedRider: {
+    fontSize: 16,
+    color: '#6B7280',
+  },
+
   // Expandable Header Bar
   header: {
     position: 'absolute',
@@ -923,7 +1127,7 @@ const styles = StyleSheet.create({
   // Today's Performance Panel
   performancePanel: {
     position: 'absolute',
-    top: 90,
+    top: 70,
     left: 16,
     right: 16,
     backgroundColor: '#FFFFFF',

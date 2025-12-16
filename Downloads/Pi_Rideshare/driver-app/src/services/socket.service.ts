@@ -47,6 +47,11 @@ class SocketService {
   private isConnected: boolean = false;
   private reconnectAttempts: number = 0;
   private listeners: Map<string, Function[]> = new Map();
+  
+  // Store for reconnection
+  private lastDriverId: string | null = null;
+  private lastLocation: { lat: number; lng: number } | null = null;
+  private wasOnline: boolean = false;
 
   /**
    * Initialize Socket Connection
@@ -135,10 +140,22 @@ class SocketService {
 
     // Connection events
     this.socket.on('connect', () => {
-      console.log('✅ Socket connected');
-      this.isConnected = true;
-      this.reconnectAttempts = 0;
-    });
+        console.log('✅ Socket connected');
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+
+        // Re-register if driver was online before disconnect
+        if (this.wasOnline && this.lastDriverId && this.lastLocation) {
+          console.log('🔄 Re-registering driver after reconnect');
+          this.socket?.emit(SOCKET_CONFIG.events.DRIVER_CONNECT, {
+            driverId: this.lastDriverId,
+            status: 'online',
+            isAvailable: true,
+            location: this.lastLocation,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
 
     this.socket.on('disconnect', (reason) => {
       console.warn('⚠️ Socket disconnected:', reason);
@@ -276,18 +293,23 @@ sendLocationUpdate(location: {
  * @param data - Driver ID, location, and optional vehicle info
  */
 driverConnect(data: {
-  driverId: string;
-  location: { lat: number; lng: number };
-  vehicle?: any;
-}): void {
-  if (!this.socket || !this.isConnected) {
-    console.warn('⚠️ Cannot go online: socket not connected');
-    return;
-  }
+    driverId: string;
+    location: { lat: number; lng: number };
+    vehicle?: any;
+  }): void {
+    // Store for reconnection
+    this.lastDriverId = data.driverId;
+    this.lastLocation = data.location;
+    this.wasOnline = true;
 
-  console.log('🟢 Driver going ONLINE');
+    if (!this.socket || !this.isConnected) {
+      console.warn('⚠️ Cannot go online: socket not connected');
+      return;
+    }
 
-  this.socket.emit(SOCKET_CONFIG.events.DRIVER_CONNECT, {
+    console.log('🟢 Driver going ONLINE');
+
+    this.socket.emit(SOCKET_CONFIG.events.DRIVER_CONNECT, {
     driverId: data.driverId,
     status: 'online',
     isAvailable: true,
@@ -303,12 +325,16 @@ driverConnect(data: {
  * @param driverId - Driver's user ID
  */
 driverDisconnect(driverId: string): void {
-  if (!this.socket || !this.isConnected) {
-    console.warn('⚠️ Cannot go offline: socket not connected');
-    return;
-  }
+    // Clear reconnect state - driver intentionally going offline
+    this.wasOnline = false;
+    this.lastLocation = null;
 
-  console.log('🔴 Driver going OFFLINE');
+    if (!this.socket || !this.isConnected) {
+      console.warn('⚠️ Cannot go offline: socket not connected');
+      return;
+    }
+
+    console.log('🔴 Driver going OFFLINE');
 
   this.socket.emit(SOCKET_CONFIG.events.DRIVER_CONNECT, {
     driverId,
@@ -412,6 +438,26 @@ rejectRide(driverId: string, rideId: string): void {
       this.listeners.delete(event);
     }
   }
+
+/**
+ * Listen for surge zone updates
+ */
+onSurgeUpdate(callback: () => void): void {
+  if (!this.socket) {
+    console.error('❌ Socket not connected');
+    return;
+  }
+  this.socket.on('surge-update', callback);
+}
+
+/**
+ * Stop listening for surge updates
+ */
+offSurgeUpdate(): void {
+  if (this.socket) {
+    this.socket.off('surge-update');
+  }
+}
 
   /**
    * Check if socket is connected
