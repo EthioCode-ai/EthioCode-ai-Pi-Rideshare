@@ -9338,6 +9338,89 @@ app.post('/api/admin/markets/generate-all-grids', authenticateToken, async (req,
   }
 });
 
+// Generate surge grid for an airport (3-mile radius)
+  app.post('/api/admin/airports/:code/generate-grid', authenticateToken, async (req, res) => {
+    try {
+      const { code } = req.params;
+      const { cellSize = 0.15, maxRadiusMiles = 3 } = req.body;
+      
+      // Get airport info
+      const airportResult = await db.query(
+        'SELECT id, market_id, airport_code, airport_name, latitude, longitude FROM airport_zones WHERE airport_code = $1',
+        [code.toUpperCase()]
+      );
+      
+      if (airportResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Airport not found' });
+      }
+      
+      const airport = airportResult.rows[0];
+      const centerLat = parseFloat(airport.latitude);
+      const centerLng = parseFloat(airport.longitude);
+      
+      console.log(`✈️ Generating grid for ${airport.airport_name}: center(${centerLat}, ${centerLng}), radius ${maxRadiusMiles}mi`);
+      
+      // Calculate grid parameters
+      const hexRadius = cellSize * 0.01446;
+      const hexWidth = cellSize * 0.01793 / Math.cos(centerLat * Math.PI / 180);
+      const rowSpacing = hexRadius * 1.5;
+      const colSpacing = hexWidth * Math.sqrt(3) / 2;
+      const gridRadius = Math.ceil(maxRadiusMiles / cellSize);
+      
+      let zonesCreated = 0;
+      
+      for (let row = -gridRadius; row <= gridRadius; row++) {
+        for (let col = -gridRadius; col <= gridRadius; col++) {
+          const cellLat = centerLat + (row * rowSpacing);
+          const cellLng = centerLng + (col * colSpacing) + (row % 2 === 1 ? colSpacing / 2 : 0);
+          
+          // Check if within radius
+          const distFromCenter = Math.sqrt(
+            Math.pow((cellLat - centerLat) / 0.01446, 2) + 
+            Math.pow((cellLng - centerLng) / (0.01793 / Math.cos(centerLat * Math.PI / 180)), 2)
+          );
+          
+          if (distFromCenter > maxRadiusMiles) continue;
+          
+          const cellCode = `${code.toUpperCase()}-${String(row + gridRadius + 1).padStart(2, '0')}-${String(col + gridRadius + 1).padStart(2, '0')}`;
+          
+          const hexCoords = [
+            { lat: cellLat + hexRadius, lng: cellLng },
+            { lat: cellLat + (hexRadius * 0.5), lng: cellLng + hexWidth },
+            { lat: cellLat - (hexRadius * 0.5), lng: cellLng + hexWidth },
+            { lat: cellLat - hexRadius, lng: cellLng },
+            { lat: cellLat - (hexRadius * 0.5), lng: cellLng - hexWidth },
+            { lat: cellLat + (hexRadius * 0.5), lng: cellLng - hexWidth }
+          ];
+          
+          const zoneResult = await db.query(`
+            INSERT INTO surge_zones_v2 (market_id, zone_code, polygon_coords, center_lat, center_lng)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+          `, [airport.market_id, cellCode, JSON.stringify(hexCoords), cellLat, cellLng]);
+          
+          await db.query('INSERT INTO surge_zone_state (zone_id) VALUES ($1)', [zoneResult.rows[0].id]);
+          zonesCreated++;
+        }
+      }
+      
+      console.log(`✅ Created ${zonesCreated} zones for ${airport.airport_name}`);
+      res.json({ 
+        success: true, 
+        airport: airport.airport_name,
+        code: airport.airport_code,
+        zonesCreated,
+        cellSize: `${cellSize} miles`,
+        coverageRadius: `${maxRadiusMiles} miles`
+      });
+      
+    } catch (error) {
+      console.error('Generate airport grid error:', error);
+      res.status(500).json({ error: 'Failed to generate airport grid' });
+    }
+  });
+
+
 // Calculate surge for all zones (called every 60 seconds)
 // Calculate surge with gradient-based clustering
 async function calculateSurgeForAllZones() {
