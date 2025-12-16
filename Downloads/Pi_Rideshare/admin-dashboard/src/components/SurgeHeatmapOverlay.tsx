@@ -42,8 +42,8 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
     if (!gridCells || gridCells.length === 0) return;
 
     // Separate airport zones from city zones
-    const airportZones = gridCells.filter((z: any) => z.zoneType === 'airport');
-    const cityZones = gridCells.filter((z: any) => z.zoneType !== 'airport');
+    const airportZones = gridCells.filter(z => z.code.match(/^[A-Z]{3}-/));
+    const cityZones = gridCells.filter(z => !z.code.match(/^[A-Z]{3}-/));
 
     const labelZones: { center: { lat: number; lng: number }; surgeAmount: string; multiplier: number }[] = [];
 
