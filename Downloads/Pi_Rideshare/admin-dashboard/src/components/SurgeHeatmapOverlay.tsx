@@ -1,17 +1,22 @@
 import React, { useEffect, useRef } from 'react';
 
-interface GridCell {
+interface SurgeZone {
   id: string;
   code: string;
   center: { lat: number; lng: number };
   polygon: { lat: number; lng: number }[];
   demand: number;
+  supply: number;
+  avgWaitMinutes: number;
+  multiplier: number;
+  surgeAmount: string;
+  factors: string[];
 }
 
 interface SurgeHeatmapOverlayProps {
   map: google.maps.Map | null;
-  gridCells: GridCell[];
-  onCellClick?: (cell: GridCell) => void;
+  gridCells: SurgeZone[];
+  onCellClick?: (cell: SurgeZone) => void;
 }
 
 const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
@@ -29,20 +34,20 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
     markersRef.current = [];
   };
 
-  // Get color based on demand
-  const getDemandColor = (demand: number): string => {
-    if (demand >= 2.5) return '#dc2626'; // Red
-    if (demand >= 2.0) return '#f97316'; // Orange  
-    if (demand >= 1.75) return '#eab308'; // Yellow
-    if (demand >= 1.5) return '#84cc16'; // Light green
-    return 'transparent'; // No color for normal demand
+  // Get color based on multiplier
+  const getSurgeColor = (multiplier: number): string => {
+    if (multiplier >= 2.5) return '#dc2626'; // Red - extreme
+    if (multiplier >= 2.0) return '#f97316'; // Orange - high
+    if (multiplier >= 1.75) return '#eab308'; // Yellow - medium
+    if (multiplier >= 1.5) return '#84cc16'; // Light green - low
+    return 'transparent';
   };
 
-  const getOpacity = (demand: number): number => {
-    if (demand >= 2.5) return 0.6;
-    if (demand >= 2.0) return 0.5;
-    if (demand >= 1.75) return 0.4;
-    if (demand >= 1.5) return 0.3;
+  const getOpacity = (multiplier: number): number => {
+    if (multiplier >= 2.5) return 0.6;
+    if (multiplier >= 2.0) return 0.5;
+    if (multiplier >= 1.75) return 0.4;
+    if (multiplier >= 1.5) return 0.3;
     return 0;
   };
 
@@ -51,51 +56,58 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
 
     clearOverlays();
 
-    gridCells.forEach(cell => {
-      const color = getDemandColor(cell.demand);
-      const opacity = getOpacity(cell.demand);
-      
-      // Only render cells with demand >= 1.5
-      if (cell.demand < 1.5) return;
+    if (!gridCells || gridCells.length === 0) return;
+
+    gridCells.forEach(zone => {
+      const color = getSurgeColor(zone.multiplier);
+      const opacity = getOpacity(zone.multiplier);
+
+      // Only render zones with active surge
+      if (zone.multiplier < 1.5) return;
+
+      // Parse polygon if it's a string
+      const polygonCoords = typeof zone.polygon === 'string' 
+        ? JSON.parse(zone.polygon) 
+        : zone.polygon;
 
       const polygon = new google.maps.Polygon({
-        paths: cell.polygon.map(p => ({ lat: p.lat, lng: p.lng })),
+        paths: polygonCoords.map((p: any) => ({ lat: p.lat, lng: p.lng })),
         strokeColor: color,
         strokeOpacity: 0.8,
         strokeWeight: 1,
         fillColor: color,
         fillOpacity: opacity,
         map: map,
-        zIndex: Math.floor(cell.demand * 10)
+        zIndex: Math.floor(zone.multiplier * 10)
       });
 
       if (onCellClick) {
-        polygon.addListener('click', () => onCellClick(cell));
+        polygon.addListener('click', () => onCellClick(zone));
       }
 
       polygonsRef.current.push(polygon);
 
-      // Add surge label for high demand cells
-      if (cell.demand >= 1.75) {
-        const surgeExtra = ((cell.demand - 1) * 5).toFixed(2);
-        
-        const marker = new google.maps.Marker({
-          position: cell.center,
-          map: map,
-          label: {
-            text: `+$${surgeExtra}`,
-            color: 'white',
-            fontSize: '11px',
-            fontWeight: 'bold'
-          },
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 0
-          }
-        });
-        
-        markersRef.current.push(marker);
+      // Add surge label
+      const marker = new google.maps.Marker({
+        position: zone.center,
+        map: map,
+        label: {
+          text: `+$${zone.surgeAmount}`,
+          color: 'white',
+          fontSize: '11px',
+          fontWeight: 'bold'
+        },
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 0
+        },
+        title: `${zone.code}: ${zone.multiplier}x surge\n${zone.demand} rides, ${zone.supply} drivers\n${zone.factors.join(', ')}`
+      });
+
+      if (onCellClick) {
+        marker.addListener('click', () => onCellClick(zone));
       }
+      markersRef.current.push(marker);
     });
 
     return () => clearOverlays();
