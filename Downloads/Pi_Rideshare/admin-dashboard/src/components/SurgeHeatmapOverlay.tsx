@@ -24,29 +24,17 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
   gridCells,
   onCellClick
 }) => {
-  const polygonsRef = useRef<google.maps.Polygon[]>([]);
+  const overlayRef = useRef<google.maps.GroundOverlay | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const clearOverlays = () => {
-    polygonsRef.current.forEach(p => p.setMap(null));
+    if (overlayRef.current) {
+      overlayRef.current.setMap(null);
+      overlayRef.current = null;
+    }
     markersRef.current.forEach(m => m.setMap(null));
-    polygonsRef.current = [];
     markersRef.current = [];
-  };
-
-  // Purple gradient based on multiplier
-  const getColor = (multiplier: number): string => {
-    if (multiplier >= 2.5) return '#581c87'; // Dark purple
-    if (multiplier >= 2.0) return '#7c3aed'; // Purple
-    if (multiplier >= 1.75) return '#8b5cf6'; // Medium purple
-    return '#a78bfa'; // Light purple
-  };
-
-  const getOpacity = (multiplier: number): number => {
-    if (multiplier >= 2.5) return 0.7;
-    if (multiplier >= 2.0) return 0.55;
-    if (multiplier >= 1.75) return 0.4;
-    return 0.3;
   };
 
   useEffect(() => {
@@ -54,27 +42,21 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
     clearOverlays();
     if (!gridCells || gridCells.length === 0) return;
 
-    // Find hotspot centers for labels (highest multiplier zones)
-    const hotspotCenters: { center: { lat: number; lng: number }; surgeAmount: string; multiplier: number }[] = [];
-    const labeledZones = new Set<string>();
-
-    // Sort by multiplier to find peaks
-    const sorted = [...gridCells].sort((a, b) => b.multiplier - a.multiplier);
+    // Find hotspots (zones with multiplier >= 2.0 for labels)
+    const hotspots: { center: { lat: number; lng: number }; surgeAmount: string; multiplier: number }[] = [];
+    const sorted = [...gridCells].filter(z => z.multiplier >= 2.0).sort((a, b) => b.multiplier - a.multiplier);
     
     for (const zone of sorted) {
-      if (zone.multiplier < 1.5) continue;
-      
-      // Check if too close to existing label
-      const tooClose = hotspotCenters.some(h => {
+      const tooClose = hotspots.some(h => {
         const dist = Math.sqrt(
           Math.pow(h.center.lat - zone.center.lat, 2) +
           Math.pow(h.center.lng - zone.center.lng, 2)
         );
-        return dist < 0.012; // ~0.8 mile apart minimum
+        return dist < 0.015;
       });
 
-      if (!tooClose && zone.multiplier >= 2.0) {
-        hotspotCenters.push({
+      if (!tooClose) {
+        hotspots.push({
           center: zone.center,
           surgeAmount: zone.surgeAmount,
           multiplier: zone.multiplier
@@ -82,29 +64,71 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
       }
     }
 
-    // Render all zones as borderless polygons (they blend together)
-    for (const zone of gridCells) {
-      if (zone.multiplier < 1.25) continue;
+    // Calculate bounds
+    const allZones = gridCells.filter(z => z.multiplier >= 1.25);
+    if (allZones.length === 0) return;
 
-      const polygonCoords = typeof zone.polygon === 'string' 
-        ? JSON.parse(zone.polygon) 
-        : zone.polygon;
+    const lats = allZones.map(z => z.center.lat);
+    const lngs = allZones.map(z => z.center.lng);
+    const minLat = Math.min(...lats) - 0.01;
+    const maxLat = Math.max(...lats) + 0.01;
+    const minLng = Math.min(...lngs) - 0.01;
+    const maxLng = Math.max(...lngs) + 0.01;
 
-      const polygon = new google.maps.Polygon({
-        paths: polygonCoords.map((p: any) => ({ lat: p.lat, lng: p.lng })),
-        strokeWeight: 0, // NO BORDERS - zones blend together
-        strokeOpacity: 0,
-        fillColor: getColor(zone.multiplier),
-        fillOpacity: getOpacity(zone.multiplier),
-        map: map,
-        zIndex: Math.floor(zone.multiplier * 10)
-      });
+    // Create canvas for smooth heatmap
+    const canvas = document.createElement('canvas');
+    const width = 800;
+    const height = 800;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-      polygonsRef.current.push(polygon);
+    // Clear with transparent
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw each zone as a soft radial gradient
+    for (const zone of allZones) {
+      const x = ((zone.center.lng - minLng) / (maxLng - minLng)) * width;
+      const y = ((maxLat - zone.center.lat) / (maxLat - minLat)) * height;
+      
+      const intensity = (zone.multiplier - 1.0) / 2.0; // 0 to 1
+      const radius = 25 + (intensity * 15);
+
+      const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      
+      // Purple gradient
+      const alpha = Math.min(0.6, intensity * 0.8);
+      gradient.addColorStop(0, `rgba(124, 58, 237, ${alpha})`);
+      gradient.addColorStop(0.5, `rgba(139, 92, 246, ${alpha * 0.7})`);
+      gradient.addColorStop(1, `rgba(167, 139, 250, 0)`);
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // Add ONE label per hotspot area
-    for (const hotspot of hotspotCenters) {
+    // Apply blur for smoothness
+    ctx.filter = 'blur(8px)';
+    const imageData = ctx.getImageData(0, 0, width, height);
+    ctx.putImageData(imageData, 0, 0);
+
+    // Create ground overlay
+    const bounds = new google.maps.LatLngBounds(
+      new google.maps.LatLng(minLat, minLng),
+      new google.maps.LatLng(maxLat, maxLng)
+    );
+
+    overlayRef.current = new google.maps.GroundOverlay(
+      canvas.toDataURL(),
+      bounds,
+      { opacity: 0.85 }
+    );
+    overlayRef.current.setMap(map);
+
+    // Add ONE label per hotspot (only high-surge centers)
+    for (const hotspot of hotspots) {
       const marker = new google.maps.Marker({
         position: hotspot.center,
         map: map,
@@ -120,12 +144,11 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
         },
         zIndex: 1000
       });
-
       markersRef.current.push(marker);
     }
 
     return () => clearOverlays();
-  }, [map, gridCells, onCellClick]);
+  }, [map, gridCells]);
 
   useEffect(() => {
     return () => clearOverlays();
