@@ -24,14 +24,29 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
   gridCells,
   onCellClick
 }) => {
-  const circlesRef = useRef<google.maps.Circle[]>([]);
+  const polygonsRef = useRef<google.maps.Polygon[]>([]);
   const markersRef = useRef<google.maps.Marker[]>([]);
 
   const clearOverlays = () => {
-    circlesRef.current.forEach(c => c.setMap(null));
+    polygonsRef.current.forEach(p => p.setMap(null));
     markersRef.current.forEach(m => m.setMap(null));
-    circlesRef.current = [];
+    polygonsRef.current = [];
     markersRef.current = [];
+  };
+
+  // Purple gradient based on multiplier
+  const getColor = (multiplier: number): string => {
+    if (multiplier >= 2.5) return '#581c87'; // Dark purple
+    if (multiplier >= 2.0) return '#7c3aed'; // Purple
+    if (multiplier >= 1.75) return '#8b5cf6'; // Medium purple
+    return '#a78bfa'; // Light purple
+  };
+
+  const getOpacity = (multiplier: number): number => {
+    if (multiplier >= 2.5) return 0.7;
+    if (multiplier >= 2.0) return 0.55;
+    if (multiplier >= 1.75) return 0.4;
+    return 0.3;
   };
 
   useEffect(() => {
@@ -39,71 +54,57 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
     clearOverlays();
     if (!gridCells || gridCells.length === 0) return;
 
-    // Group zones into hotspots (cluster nearby zones)
-    const hotspots: { center: { lat: number; lng: number }; maxMultiplier: number; surgeAmount: string; zones: SurgeZone[] }[] = [];
-    const processed = new Set<string>();
+    // Find hotspot centers for labels (highest multiplier zones)
+    const hotspotCenters: { center: { lat: number; lng: number }; surgeAmount: string; multiplier: number }[] = [];
+    const labeledZones = new Set<string>();
 
-    // Sort by multiplier descending to find hotspot centers first
-    const sortedZones = [...gridCells].sort((a, b) => b.multiplier - a.multiplier);
-
-    for (const zone of sortedZones) {
-      if (processed.has(zone.id)) continue;
+    // Sort by multiplier to find peaks
+    const sorted = [...gridCells].sort((a, b) => b.multiplier - a.multiplier);
+    
+    for (const zone of sorted) {
       if (zone.multiplier < 1.5) continue;
-
-      // Start a new hotspot
-      const hotspot = {
-        center: zone.center,
-        maxMultiplier: zone.multiplier,
-        surgeAmount: zone.surgeAmount,
-        zones: [zone]
-      };
-      processed.add(zone.id);
-
-      // Find all zones within 0.015 degrees (~1 mile) of this center
-      for (const other of sortedZones) {
-        if (processed.has(other.id)) continue;
+      
+      // Check if too close to existing label
+      const tooClose = hotspotCenters.some(h => {
         const dist = Math.sqrt(
-          Math.pow(other.center.lat - zone.center.lat, 2) +
-          Math.pow(other.center.lng - zone.center.lng, 2)
+          Math.pow(h.center.lat - zone.center.lat, 2) +
+          Math.pow(h.center.lng - zone.center.lng, 2)
         );
-        if (dist < 0.015) {
-          hotspot.zones.push(other);
-          processed.add(other.id);
-        }
-      }
+        return dist < 0.012; // ~0.8 mile apart minimum
+      });
 
-      hotspots.push(hotspot);
+      if (!tooClose && zone.multiplier >= 2.0) {
+        hotspotCenters.push({
+          center: zone.center,
+          surgeAmount: zone.surgeAmount,
+          multiplier: zone.multiplier
+        });
+      }
     }
 
-    // Render each hotspot as smooth gradient circles
-    hotspots.forEach(hotspot => {
-      const baseRadius = 800 + (hotspot.zones.length * 100); // Radius based on cluster size
-      
-      // Create concentric circles for gradient effect (outer to inner)
-      const layers = 5;
-      for (let i = layers; i >= 1; i--) {
-        const radius = baseRadius * (i / layers);
-        const opacity = 0.15 + (0.35 * ((layers - i + 1) / layers));
-        
-        // Purple color like Uber - darker in center
-        const purple = i <= 2 ? '#7c3aed' : i <= 3 ? '#8b5cf6' : '#a78bfa';
-        
-        const circle = new google.maps.Circle({
-          center: hotspot.center,
-          radius: radius,
-          strokeColor: purple,
-          strokeOpacity: 0,
-          strokeWeight: 0,
-          fillColor: purple,
-          fillOpacity: opacity,
-          map: map,
-          zIndex: layers - i
-        });
+    // Render all zones as borderless polygons (they blend together)
+    for (const zone of gridCells) {
+      if (zone.multiplier < 1.25) continue;
 
-        circlesRef.current.push(circle);
-      }
+      const polygonCoords = typeof zone.polygon === 'string' 
+        ? JSON.parse(zone.polygon) 
+        : zone.polygon;
 
-      // ONE label per hotspot - at center with pill background
+      const polygon = new google.maps.Polygon({
+        paths: polygonCoords.map((p: any) => ({ lat: p.lat, lng: p.lng })),
+        strokeWeight: 0, // NO BORDERS - zones blend together
+        strokeOpacity: 0,
+        fillColor: getColor(zone.multiplier),
+        fillOpacity: getOpacity(zone.multiplier),
+        map: map,
+        zIndex: Math.floor(zone.multiplier * 10)
+      });
+
+      polygonsRef.current.push(polygon);
+    }
+
+    // Add ONE label per hotspot area
+    for (const hotspot of hotspotCenters) {
       const marker = new google.maps.Marker({
         position: hotspot.center,
         map: map,
@@ -114,15 +115,14 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
         label: {
           text: `+$${hotspot.surgeAmount}`,
           color: 'white',
-          fontSize: '13px',
-          fontWeight: 'bold',
-          className: 'surge-label-pill'
+          fontSize: '14px',
+          fontWeight: 'bold'
         },
         zIndex: 1000
       });
 
       markersRef.current.push(marker);
-    });
+    }
 
     return () => clearOverlays();
   }, [map, gridCells, onCellClick]);
