@@ -1272,6 +1272,42 @@ app.get('/api/driver/ride-requests', authenticateToken, async (req, res) => {
   }
 });
 
+// Driver surge zones - same data as admin but accessible to drivers
+app.get('/api/driver/surge/nearby', authenticateToken, async (req, res) => {
+  try {
+    const query = `
+      SELECT sz.id, sz.zone_code, sz.zone_type, sz.center_lat, sz.center_lng, sz.polygon_coords,
+             ss.current_demand, ss.current_supply, ss.avg_wait_minutes,
+             ss.current_multiplier, ss.factors, ss.updated_at
+      FROM surge_zones_v2 sz
+      JOIN surge_zone_state ss ON sz.id = ss.zone_id
+      WHERE ss.current_multiplier > 1.0
+      ORDER BY ss.current_multiplier DESC
+    `;
+    const result = await db.query(query);
+    
+    const zones = result.rows.map(row => ({
+      id: row.id,
+      code: row.zone_code,
+      zoneType: row.zone_type,
+      center: { lat: parseFloat(row.center_lat), lng: parseFloat(row.center_lng) },
+      polygon: typeof row.polygon_coords === 'string' ? JSON.parse(row.polygon_coords) : row.polygon_coords,
+      demand: row.current_demand,
+      supply: row.current_supply,
+      avgWaitMinutes: parseFloat(row.avg_wait_minutes) || 0,
+      multiplier: parseFloat(row.current_multiplier),
+      surgeAmount: ((parseFloat(row.current_multiplier) - 1) * 5).toFixed(2),
+      factors: row.factors || []
+    }));
+    
+    res.json({ success: true, zones });
+  } catch (error) {
+    console.error('Driver surge zones error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 // Admin Management APIs - Get all drivers
 app.get('/api/admin/drivers', authenticateToken, async (req, res) => {
   try {
