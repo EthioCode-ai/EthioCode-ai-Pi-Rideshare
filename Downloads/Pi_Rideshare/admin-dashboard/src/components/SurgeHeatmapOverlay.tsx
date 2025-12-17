@@ -47,26 +47,77 @@ const SurgeHeatmapOverlay: React.FC<SurgeHeatmapOverlayProps> = ({
 
     const labelZones: { center: { lat: number; lng: number }; surgeAmount: string; multiplier: number }[] = [];
 
-    // City labels - closer spacing for more labels on edges
-    const sortedCity = [...cityZones].filter(z => z.multiplier >= 1.5).sort((a, b) => b.multiplier - a.multiplier);
-    
-    for (const zone of sortedCity) {
-      const tooClose = labelZones.some(h => {
-        const dist = Math.sqrt(
-          Math.pow(h.center.lat - zone.center.lat, 2) +
-          Math.pow(h.center.lng - zone.center.lng, 2)
-        );
-        return dist < 0.012; // Smaller = more labels
-      });
+    // City labels - show gradient from center to edges
+const sortedCity = [...cityZones].filter(z => z.multiplier >= 1.25).sort((a, b) => b.multiplier - a.multiplier);
 
-      if (!tooClose) {
-        labelZones.push({
-          center: zone.center,
-          surgeAmount: zone.surgeAmount,
-          multiplier: zone.multiplier
-        });
-      }
+// Group by hotspots (zones close together)
+const hotspots: typeof sortedCity[] = [];
+const assigned = new Set<string>();
+
+for (const zone of sortedCity) {
+  if (assigned.has(zone.id)) continue;
+  
+  // Find all zones within this hotspot
+  const hotspot = sortedCity.filter(z => {
+    const dist = Math.sqrt(
+      Math.pow(z.center.lat - zone.center.lat, 2) +
+      Math.pow(z.center.lng - zone.center.lng, 2)
+    );
+    return dist < 0.02; // ~1.4 miles = same hotspot
+  });
+  
+  hotspot.forEach(z => assigned.add(z.id));
+  if (hotspot.length > 0) hotspots.push(hotspot);
+}
+
+// For each hotspot, pick center + edge labels
+for (const hotspot of hotspots) {
+  const sorted = [...hotspot].sort((a, b) => b.multiplier - a.multiplier);
+  
+  // 1. Center label (highest multiplier)
+  if (sorted[0]) {
+    labelZones.push({
+      center: sorted[0].center,
+      surgeAmount: sorted[0].surgeAmount,
+      multiplier: sorted[0].multiplier
+    });
+  }
+  
+  // 2. Edge labels (lower multipliers, spaced out)
+  const center = sorted[0];
+  const edges = sorted.filter(z => {
+    const dist = Math.sqrt(
+      Math.pow(z.center.lat - center.center.lat, 2) +
+      Math.pow(z.center.lng - center.center.lng, 2)
+    );
+    return dist > 0.008 && z.multiplier < center.multiplier * 0.85;
+  });
+  
+  // Pick up to 3 edge labels, spaced apart
+  let edgeCount = 0;
+  for (const edge of edges) {
+    if (edgeCount >= 3) break;
+    
+    const tooClose = labelZones.some(lz => {
+      const dist = Math.sqrt(
+        Math.pow(lz.center.lat - edge.center.lat, 2) +
+        Math.pow(lz.center.lng - edge.center.lng, 2)
+      );
+      return dist < 0.006;
+    });
+    
+    if (!tooClose) {
+      labelZones.push({
+        center: edge.center,
+        surgeAmount: edge.surgeAmount,
+        multiplier: edge.multiplier
+      });
+      edgeCount++;
     }
+  }
+}
+
+// Airport labels - exactly 3: center + 2 edges
 
     // Airport labels - exactly 3: center + 2 edges
     const airportCodes = [...new Set(airportZones.map(z => z.code.split('-')[0]))];
