@@ -22,6 +22,7 @@ import { MainStackParamList } from '../navigation/RootNavigator';
 import { ActiveRide, TripStatus } from '../types/ride.types';
 import { API_BASE_URL } from '../config/api.config';
 import SurgeOverlay from '../components/SurgeOverlay';
+import { StorageKeys } from '../constants/StorageKeys';
 
 // Performance data interface
 interface PerformanceData {
@@ -232,7 +233,7 @@ useEffect(() => {
 // Fetch surge zones for heatmap overlay
 const fetchSurgeZones = async () => {
   try {
-    const token = await AsyncStorage.getItem('authToken');
+    const token = await AsyncStorage.getItem(StorageKeys.AUTH_TOKEN);
     const response = await fetch(`${API_BASE_URL}/api/admin/surge/active-zones`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
