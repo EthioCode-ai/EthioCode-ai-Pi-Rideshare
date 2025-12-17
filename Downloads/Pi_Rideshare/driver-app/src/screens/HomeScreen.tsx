@@ -98,6 +98,7 @@ const HomeScreen: React.FC = () => {
     
     initializeLocation();
     fetchPerformanceData();
+    fetchSurgeZones();  // ADD THIS LINE
   }, []);
 
   // Handle completed trip from ActiveRideScreen
