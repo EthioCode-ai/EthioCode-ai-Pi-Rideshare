@@ -407,7 +407,10 @@ const toggleOnlineStatus = async () => {
       setHeaderExpanded(false);
       setRideState('waiting');
       
-      // 5. Animate camera
+       // 5. Fetch surge zones
+      fetchSurgeZones();
+
+      // 6. Animate camera
       if (mapRef.current && location) {
         mapRef.current.animateCamera({
           center: {
