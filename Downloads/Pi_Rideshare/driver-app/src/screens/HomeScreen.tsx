@@ -379,7 +379,7 @@ useEffect(() => {
               },
               heading: newLocation.coords.heading,
               pitch: 60,
-              zoom: 19,
+              //zoom: 19,
             }, { duration: 500 });
           }
         }
@@ -446,7 +446,7 @@ const toggleOnlineStatus = async () => {
           },
           heading: heading,
           pitch: 60,
-          zoom: 19,
+          zoom: 16,
         }, { duration: 1000 });
       }
       

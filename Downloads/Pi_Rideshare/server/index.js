@@ -676,7 +676,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     const token = jwt.sign(
       { userId: user.id, email: user.email, userType: user.user_type },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '7d' }
     );
 
     res.status(201).json({

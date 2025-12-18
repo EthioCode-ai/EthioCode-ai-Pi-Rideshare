@@ -20,4 +20,24 @@ export const getSocketUrl = (): string => {
   return API_BASE_URL;
 };
 
+// Wrapper for fetch that handles 403 errors
+export const authFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
+  const token = localStorage.getItem('authToken');
+  
+  const headers = {
+    ...options.headers,
+    'Authorization': `Bearer ${token}`,
+  };
+
+  const response = await fetch(url, { ...options, headers });
+
+  if (response.status === 403 || response.status === 401) {
+    console.warn('🔒 Token expired or invalid. Logging out...');
+    localStorage.clear();
+    window.location.href = '/login';
+  }
+
+  return response;
+};
+
 export default config;
