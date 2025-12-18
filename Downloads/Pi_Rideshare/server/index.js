@@ -8820,6 +8820,7 @@ app.post('/api/driver/verify-badge', authenticateToken, async (req, res) => {
 
 // Get rider's corporate application for verification
 // Search rider's corporate info by name or ID
+// Search rider's corporate info by name or ID
 app.get('/api/driver/rider-corporate-info/:search', authenticateToken, async (req, res) => {
   try {
     const { search } = req.params;
@@ -8833,8 +8834,9 @@ app.get('/api/driver/rider-corporate-info/:search', authenticateToken, async (re
     if (isUUID) {
       query = `
         SELECT ca.id, ca.rider_id, ca.department, ca.status, ca.work_email,
+               ca.work_id_image_url, ca.discount_end_date,
                u.first_name, u.last_name, u.email,
-               c.company_name
+               c.company_name, c.discount_percentage, c.discount_fixed_amount
         FROM corporate_applications ca
         JOIN users u ON ca.rider_id = u.id
         JOIN corporations c ON ca.corporation_id = c.id
@@ -8847,8 +8849,9 @@ app.get('/api/driver/rider-corporate-info/:search', authenticateToken, async (re
       // Search by name (first or last)
       query = `
         SELECT ca.id, ca.rider_id, ca.department, ca.status, ca.work_email,
+               ca.work_id_image_url, ca.discount_end_date,
                u.first_name, u.last_name, u.email,
-               c.company_name
+               c.company_name, c.discount_percentage, c.discount_fixed_amount
         FROM corporate_applications ca
         JOIN users u ON ca.rider_id = u.id
         JOIN corporations c ON ca.corporation_id = c.id
@@ -8867,38 +8870,41 @@ app.get('/api/driver/rider-corporate-info/:search', authenticateToken, async (re
       return res.status(404).json({ error: 'No corporate discount found' });
     }
     
+    // Map to frontend expected field names
+    const mapRow = (row) => ({
+      id: row.id,
+      rider_id: row.rider_id,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      email: row.email,
+      company_name: row.company_name,
+      department: row.department,
+      work_email: row.work_email,
+      work_id_image_url: row.work_id_image_url,
+      discount_end_date: row.discount_end_date,
+      discount_percentage: row.discount_percentage,
+      discount_fixed_amount: row.discount_fixed_amount,
+      status: row.status
+    });
+    
     // Return single result for UUID, multiple for name search
     if (isUUID) {
-      const row = result.rows[0];
-      res.json({
-        riderId: row.rider_id,
-        firstName: row.first_name,
-        lastName: row.last_name,
-        email: row.email,
-        corporation: row.company_name,
-        department: row.department,
-        workEmail: row.work_email,
-        status: row.status
-      });
+      res.json(mapRow(result.rows[0]));
     } else {
-      res.json({
-        results: result.rows.map(row => ({
-          riderId: row.rider_id,
-          firstName: row.first_name,
-          lastName: row.last_name,
-          email: row.email,
-          corporation: row.company_name,
-          department: row.department,
-          workEmail: row.work_email,
-          status: row.status
-        }))
-      });
+      if (result.rows.length === 1) {
+        res.json(mapRow(result.rows[0]));
+      } else {
+        res.json({
+          results: result.rows.map(mapRow)
+        });
+      }
     }
   } catch (error) {
     console.error('Rider corporate info error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
+
 // Check for expired corporate discount during ride request
 app.get('/api/driver/check-expired-discount/:riderId', authenticateToken, async (req, res) => {
   try {
