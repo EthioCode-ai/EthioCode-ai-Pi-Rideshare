@@ -1,6 +1,6 @@
 /**
  * RootNavigator - Main app navigation with authentication state management
- * Phase 2.3 Implementation
+ * Phase 2.6 - Added ActiveRideScreen
  */
 
 import React, { useState, useEffect } from 'react';
@@ -9,15 +9,41 @@ import { NavigationContainer } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthStack from './AuthStack';
 import HomeScreen from '../screens/HomeScreen';
+import ActiveRideScreen from '../screens/ActiveRideScreen';
 import { StorageKeys } from '../constants/StorageKeys';
-//import ActiveRideScreen from '../screens/ActiveRideScreen';  // DELETE THIS
-//import { ActiveRide } from '../types/ride.types';  // DELETE THIS (duplicate)
+import { ActiveRide } from '../types/ride.types';
 
 import { createStackNavigator } from '@react-navigation/stack';
 
 export type MainStackParamList = {
-  Home: undefined;
-//  ActiveRide: { ride: ActiveRide };
+  Home: {
+  completedTrip?: {
+    rideId: string;
+    fare: number;
+    distance: number;
+    riderName: string;
+    completedAt: string;
+  };
+  stayOnline?: boolean;
+} | undefined;
+
+  ActiveRide: { 
+    ride: ActiveRide;
+    routeData: {
+      toPickup: {
+        polyline: string;
+        distance: { km: number; miles: number };
+        duration: { adjusted_minutes: number; seconds: number };
+        steps: any[];
+      };
+      toDestination: {
+        polyline: string;
+        distance: { km: number; miles: number };
+        duration: { adjusted_minutes: number; seconds: number };
+        steps: any[];
+      };
+    };
+  };
 };
 
 const MainStack = createStackNavigator<MainStackParamList>();
@@ -30,7 +56,14 @@ function MainAppNavigator() {
       }}
     >
       <MainStack.Screen name="Home" component={HomeScreen} />
-          </MainStack.Navigator>
+      <MainStack.Screen 
+        name="ActiveRide" 
+        component={ActiveRideScreen}
+        options={{
+          gestureEnabled: false, // Prevent swipe back during active ride
+        }}
+      />
+    </MainStack.Navigator>
   );
 }
 

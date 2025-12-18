@@ -68,22 +68,19 @@ const CorporateApplications: React.FC = () => {
       alert('Please select approve or reject');
       return;
     }
-
     if (reviewForm.status === 'rejected' && !reviewForm.rejection_reason.trim()) {
       alert('Please provide a rejection reason');
       return;
     }
-
     try {
-      const response = await fetch(apiUrl(`api/admin/corporate-applications/${applicationId}/review`), {
+      const response = await fetch(apiUrl('api/admin/corporate-applications/' + applicationId + '/review'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': 'Bearer ' + localStorage.getItem('authToken')
         },
         body: JSON.stringify(reviewForm)
       });
-
       if (response.ok) {
         await fetchApplications();
         setSelectedApplication(null);

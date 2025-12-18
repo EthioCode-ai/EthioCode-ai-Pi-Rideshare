@@ -361,4 +361,4 @@ const driverService = {
 };
 
 export default driverService;
-export type { PerformanceData, EarningsData, StatusUpdate, LocationUpdate };
+//export type { PerformanceData, EarningsData, StatusUpdate, LocationUpdate };

@@ -442,7 +442,7 @@ rejectRide(driverId: string, rideId: string): void {
 /**
  * Listen for surge zone updates
  */
-onSurgeUpdate(callback: () => void): void {
+onSurgeUpdate(callback: (data: any) => void): void {
   if (!this.socket) {
     console.error('❌ Socket not connected');
     return;

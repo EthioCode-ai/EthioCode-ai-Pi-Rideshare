@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Polygon, Marker } from 'react-native-maps';
+import { Circle, Marker } from 'react-native-maps';
 
 interface SurgeZone {
   id: string;
@@ -19,108 +19,77 @@ interface SurgeOverlayProps {
 const SurgeOverlay: React.FC<SurgeOverlayProps> = ({ zones }) => {
   if (!zones || zones.length === 0) return null;
 
-  // Get color based on multiplier
-  const getColor = (multiplier: number): string => {
-    if (multiplier >= 2.5) return 'rgba(88, 28, 135, 0.5)';   // Dark purple
-    if (multiplier >= 2.0) return 'rgba(124, 58, 237, 0.45)'; // Purple
-    if (multiplier >= 1.75) return 'rgba(139, 92, 246, 0.4)'; // Medium purple
-    return 'rgba(167, 139, 250, 0.35)';                        // Light purple
-  };
+  // Group zones into hotspots
+  const getHotspots = () => {
+    const hotspots: { center: { lat: number; lng: number }; maxMultiplier: number; surgeAmount: string }[] = [];
+    const sorted = [...zones].filter(z => z.multiplier >= 1.5).sort((a, b) => b.multiplier - a.multiplier);
+    const assigned = new Set<string>();
 
-  // Filter labels - city zones spaced 0.012 apart, airport max 3
-  const getLabels = () => {
-    const labels: SurgeZone[] = [];
-    const airportZones = zones.filter(z => z.zoneType === 'airport');
-    const cityZones = zones.filter(z => z.zoneType !== 'airport');
+    for (const zone of sorted) {
+      if (assigned.has(zone.id)) continue;
 
-    // City labels
-    const sortedCity = [...cityZones]
-      .filter(z => z.multiplier >= 1.5)
-      .sort((a, b) => b.multiplier - a.multiplier);
-
-    for (const zone of sortedCity) {
-      const tooClose = labels.some(h => {
+      const cluster = zones.filter(z => {
         const dist = Math.sqrt(
-          Math.pow(h.center.lat - zone.center.lat, 2) +
-          Math.pow(h.center.lng - zone.center.lng, 2)
+          Math.pow(z.center.lat - zone.center.lat, 2) +
+          Math.pow(z.center.lng - zone.center.lng, 2)
         );
-        return dist < 0.012;
+        return dist < 0.02;
       });
-      if (!tooClose) labels.push(zone);
-    }
 
-    // Airport labels - max 3 per airport
-    const airportCodes = [...new Set(airportZones.map(z => z.code.split('-')[0]))];
-    
-    for (const code of airportCodes) {
-      const cells = airportZones
-        .filter(z => z.code.startsWith(code + '-') && z.multiplier >= 1.25)
-        .sort((a, b) => b.multiplier - a.multiplier);
-      
-      if (cells.length === 0) continue;
-      
-      // Center label
-      labels.push(cells[0]);
-      
-      // 2 edge labels
-      let edgeCount = 0;
-      for (const cell of cells.slice(1)) {
-        if (edgeCount >= 2) break;
-        const dist = Math.sqrt(
-          Math.pow(cell.center.lat - cells[0].center.lat, 2) +
-          Math.pow(cell.center.lng - cells[0].center.lng, 2)
-        );
-        if (dist >= 0.018 && dist <= 0.028) {
-          labels.push(cell);
-          edgeCount++;
-        }
-      }
+      cluster.forEach(z => assigned.add(z.id));
+      hotspots.push({
+        center: zone.center,
+        maxMultiplier: zone.multiplier,
+        surgeAmount: zone.surgeAmount,
+      });
     }
-
-    return labels;
+    return hotspots;
   };
 
-  const labels = getLabels();
+  const hotspots = getHotspots();
 
-  // Parse polygon coords
-  const parsePolygon = (polygon: any) => {
-    const coords = typeof polygon === 'string' ? JSON.parse(polygon) : polygon;
-    return coords.map((p: any) => ({ latitude: p.lat, longitude: p.lng }));
+  // Create smooth gradient with 10 rings per hotspot
+  const renderGradient = (hotspot: typeof hotspots[0], idx: number) => {
+    const rings = [];
+    const baseRadius = 2500; // meters
+    const numRings = 10;
+
+    for (let i = numRings; i >= 1; i--) {
+      const ratio = i / numRings;
+      const radius = baseRadius * ratio;
+      const opacity = 0.35 * (1 - ratio) + 0.05; // Fade from 0.05 (outer) to 0.35 (inner)
+      
+      rings.push(
+        <Circle
+          key={`ring-${idx}-${i}`}
+          center={{ latitude: hotspot.center.lat, longitude: hotspot.center.lng }}
+          radius={radius}
+          fillColor={`rgba(88, 28, 135, ${opacity})`}
+          strokeColor="transparent"
+          strokeWidth={0}
+          zIndex={i}
+        />
+      );
+    }
+    return rings;
   };
 
   return (
     <>
-      {/* Render all surge polygons */}
-      {zones.filter(z => z.multiplier >= 1.25).map(zone => (
-        <Polygon
-          key={zone.id}
-          coordinates={parsePolygon(zone.polygon)}
-          fillColor={getColor(zone.multiplier)}
-          strokeColor="transparent"
-          strokeWidth={0}
-          zIndex={1}
-        />
-      ))}
+      {hotspots.map((hotspot, idx) => renderGradient(hotspot, idx))}
 
-      {/* Render labels */}
-      {labels.map(zone => (
+      {hotspots.map((hotspot, idx) => (
         <Marker
-          key={`label-${zone.id}`}
+          key={`label-${idx}`}
           coordinate={{
-            latitude: zone.center.lat,
-            longitude: zone.center.lng,
+            latitude: hotspot.center.lat,
+            longitude: hotspot.center.lng,
           }}
           anchor={{ x: 0.5, y: 0.5 }}
           tracksViewChanges={false}
         >
           <View style={styles.labelContainer}>
-            <Text style={[
-              styles.labelText,
-              zone.multiplier >= 2.5 ? styles.labelLarge :
-              zone.multiplier >= 2.0 ? styles.labelMedium : styles.labelSmall
-            ]}>
-              +${zone.surgeAmount}
-            </Text>
+            <Text style={styles.labelText}>+${hotspot.surgeAmount}</Text>
           </View>
         </Marker>
       ))}
@@ -135,13 +104,11 @@ const styles = StyleSheet.create({
   labelText: {
     color: 'white',
     fontWeight: 'bold',
+    fontSize: 9,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
-  labelLarge: { fontSize: 12 },
-  labelMedium: { fontSize: 11 },
-  labelSmall: { fontSize: 10 },
 });
 
 export default SurgeOverlay;

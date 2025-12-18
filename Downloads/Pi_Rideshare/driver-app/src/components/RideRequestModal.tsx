@@ -47,7 +47,7 @@ interface RideRequestModalProps {
   visible: boolean;
   request: RideRequestData | null;
   driverLocation?: { latitude: number; longitude: number } | null;
-  onAccept: (rideId: string) => void;
+  onAccept: (rideId: string, routeData: any) => void;
   onDecline: (rideId: string) => void;
   countdownDuration?: number;
 }
@@ -61,11 +61,7 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
   countdownDuration = 15000,
 }) => {
   const [countdown, setCountdown] = useState(countdownDuration / 1000);
- const [routeData, setRouteData] = useState<{
-  toPickup: { distance: { miles: number }; duration: { minutes: number }; source: string };
-  toDestination: { distance: { miles: number }; duration: { minutes: number }; source: string };
-  totalTrip: { distance: { miles: number }; duration: { minutes: number } };
-} | null>(null);
+  const [routeData, setRouteData] = useState<any>(null);
   const [loadingRoute, setLoadingRoute] = useState(false);
   const progressAnim = useRef(new Animated.Value(1)).current;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -97,14 +93,15 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
     })
       .then(res => res.json())
       .then(data => {
-        console.log('✅ Routes calculated:', data);
-        setRouteData(data);
-        setLoadingRoute(false);
+      console.log('✅ Routes calculated:', data);
+      
+      setRouteData(data);
+      setLoadingRoute(false);
       })
       .catch(error => {
-        console.error('❌ Failed to calculate routes:', error);
-        setLoadingRoute(false);
-      });
+      console.error('❌ Failed to calculate routes:', error);
+      setLoadingRoute(false);
+   });
   }
 }, [visible, request, driverLocation]);
 
@@ -155,7 +152,7 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
   const handleAccept = () => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (animationRef.current) animationRef.current.stop();
-    if (request) onAccept(request.rideId);
+    if (request) onAccept(request.rideId, routeData);
   };
 
   const handleDecline = () => {
@@ -290,13 +287,13 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
               </View>
             )}
             {request.surgeMultiplier && request.surgeMultiplier > 1 && (
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, styles.surgeValue]}>
-                  {request.surgeMultiplier.toFixed(1)}x
-                </Text>
-                <Text style={styles.statLabel}>Surge</Text>
-              </View>
-            )}
+            <View style={styles.statItem}>
+            <Text style={[styles.statValue, styles.surgeValue]}>
+            +${((request.surgeMultiplier - 1) * request.estimatedFare).toFixed(2)}
+            </Text>
+            <Text style={styles.statLabel}>Surge</Text>
+            </View>
+             )}
           </View>
 
           {/* Action Buttons */}

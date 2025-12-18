@@ -18,7 +18,7 @@ const SplashScreen: React.FC<Props> = ({ navigation }) => {
   const checkAuthStatus = async () => {
     try {
       // Check if user is already logged in
-      const user = await AuthService.initialize();
+      const user = await (AuthService as any).initialize();
 
       // Wait at least 2 seconds to show splash
       await new Promise(resolve => setTimeout(resolve, 2000));

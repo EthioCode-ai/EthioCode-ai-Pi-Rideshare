@@ -96,7 +96,7 @@ const SignupScreen: React.FC<Props> = ({ navigation }) => {
         );
       } else {
         // Registration failed
-        Alert.alert('Registration Failed', result.error || 'Unable to create account');
+        Alert.alert('Registration Failed', (result as any).error || 'Unable to create account');
       }
     } catch (error) {
       console.error('Signup error:', error);

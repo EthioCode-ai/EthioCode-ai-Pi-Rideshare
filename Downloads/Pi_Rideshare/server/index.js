@@ -1645,18 +1645,19 @@ app.post('/api/admin/corporate-applications/:id/review', authenticateToken, asyn
     const { status, review_notes, rejection_reason } = req.body;
     const applicationId = req.params.id;
     const reviewedBy = req.user.userId;
+    const isApproved = status === 'approved';
 
     const result = await db.query(`
       UPDATE corporate_applications 
-      SET status = $1, 
+      SET status = $1::varchar, 
           reviewed_by = $2, 
           reviewed_at = NOW(),
           review_notes = $3,
           rejection_reason = $4,
-          approved_at = CASE WHEN $1 = 'approved' THEN NOW() ELSE NULL END
-      WHERE id = $5
+          approved_at = CASE WHEN $5 = true THEN NOW() ELSE NULL END
+      WHERE id = $6
       RETURNING *
-    `, [status, reviewedBy, review_notes, rejection_reason, applicationId]);
+    `, [status, reviewedBy, review_notes, rejection_reason, isApproved, applicationId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Application not found' });

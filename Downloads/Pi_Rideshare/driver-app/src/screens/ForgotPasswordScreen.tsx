@@ -47,7 +47,7 @@ const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
       } else {
-        Alert.alert('Error', result.error || 'Unable to send reset email');
+       Alert.alert('Error', (result as any).error || 'Unable to send reset email');
       }
     } catch (error) {
       console.error('Password reset error:', error);

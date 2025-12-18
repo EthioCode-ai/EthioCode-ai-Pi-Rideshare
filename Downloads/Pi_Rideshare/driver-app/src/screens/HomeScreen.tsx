@@ -99,8 +99,24 @@ const HomeScreen: React.FC = () => {
     
     initializeLocation();
     fetchPerformanceData();
-    fetchSurgeZones();  // ADD THIS LINE
+    fetchSurgeZones();
+    
+    // Connect socket on app open for surge updates
+    const connectSocket = async () => {
+      const userData = await AsyncStorage.getItem(StorageKeys.USER_DATA);
+      if (userData) {
+        const user = JSON.parse(userData);
+        if (!socketService.connected) {
+          console.log('🔌 Connecting socket for surge updates...');
+          await socketService.connect(user.id);
+          setSocketConnected(true);
+        }
+      }
+    };
+    connectSocket();
   }, []);
+
+
 
   // Handle completed trip from ActiveRideScreen
 useEffect(() => {
@@ -232,28 +248,39 @@ useEffect(() => {
 
 // Fetch surge zones for heatmap overlay
 const fetchSurgeZones = async () => {
-  try {
+  console.log('fetchSurgeZones called');
+    try {
     const token = await AsyncStorage.getItem(StorageKeys.AUTH_TOKEN);
-    const response = await fetch(`${API_BASE_URL}/api/admin/surge/active-zones`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+    console.log('Token exists:', !!token);
+    console.log('Token first 50 chars:', token?.substring(0, 50));
+    const url = API_BASE_URL + '/api/driver/surge/nearby';
+    const response = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token }
     });
+    console.log('Response status:', response.status);
     if (response.ok) {
       const data = await response.json();
       if (data.success) {
         setSurgeZones(data.zones || []);
-        console.log(`🔥 Loaded ${data.zones?.length || 0} surge zones`);
+        console.log('Loaded surge zones:', data.zones?.length || 0);
       }
     }
   } catch (error) {
     console.error('Error fetching surge zones:', error);
   }
 };
+
 // Listen to Socket.IO surge updates for real-time sync
 useEffect(() => {
   if (socketConnected) {
-    socketService.onSurgeUpdate(() => {
-      console.log('🔥 Surge update received, refreshing...');
-      fetchSurgeZones();
+    socketService.onSurgeUpdate((data: any) => {
+      console.log('🔥 Surge update received:', data);
+      if (data && data.activeZones === 0) {
+        setSurgeZones([]);
+        console.log('🔥 Cleared surge zones');
+      } else {
+        fetchSurgeZones();
+      }
     });
   }
   return () => {
@@ -373,11 +400,11 @@ const toggleOnlineStatus = async () => {
     // GOING ONLINE
     try {
       // 1. Connect socket if not connected
-      if (!socketService.connected) {
-        console.log('🔌 Connecting socket...');
-        await socketService.connect(user?.id || '');
-        setSocketConnected(true);
-      }
+     if (!socketService.connected) {
+     console.log('🔌 Connecting socket...');
+     await socketService.connect(user?.id || '');
+     setSocketConnected(true);
+}
       
       // 2. Emit driver-connect
       socketService.driverConnect({
