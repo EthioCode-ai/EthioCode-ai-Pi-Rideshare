@@ -17,14 +17,24 @@ const DriverBadgeVerification = () => {
     if (!riderId.trim()) return;
     setLoading(true);
     try {
-      const response = await fetch(apiUrl('api/driver/rider-corporate-info/' + riderId), {
+      const response = await fetch(apiUrl('api/driver/rider-corporate-info/' + encodeURIComponent(riderId.trim())), {
         headers: {
           'Authorization': 'Bearer ' + localStorage.getItem('authToken')
         }
       });
       if (response.ok) {
         const data = await response.json();
-        setRiderInfo(data);
+        // Handle multiple results from name search
+        if (data.results) {
+          if (data.results.length === 1) {
+            setRiderInfo(data.results[0]);
+          } else {
+            // Show selection for multiple results
+            setRiderInfo({ multiple: true, results: data.results });
+          }
+        } else {
+          setRiderInfo(data);
+        }
       } else {
         alert('No corporate discount found for this rider');
         setRiderInfo(null);
