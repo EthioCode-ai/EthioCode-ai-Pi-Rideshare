@@ -1643,20 +1643,26 @@ app.get('/api/admin/corporate-applications/:id', authenticateToken, async (req, 
 app.post('/api/admin/corporate-applications/:id/review', authenticateToken, async (req, res) => {
   try {
     const { status, review_notes, rejection_reason } = req.body;
-    
-    const reviewData = {
-      status,
-      reviewed_by: req.user.userId,
-      review_notes,
-      rejection_reason
-    };
-    
-    const application = await db.reviewCorporateApplication(req.params.id, reviewData);
-    if (!application) {
+    const applicationId = req.params.id;
+    const reviewedBy = req.user.userId;
+
+    const result = await db.query(`
+      UPDATE corporate_applications 
+      SET status = $1, 
+          reviewed_by = $2, 
+          reviewed_at = NOW(),
+          review_notes = $3,
+          rejection_reason = $4,
+          approved_at = CASE WHEN $1 = 'approved' THEN NOW() ELSE NULL END
+      WHERE id = $5
+      RETURNING *
+    `, [status, reviewedBy, review_notes, rejection_reason, applicationId]);
+
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Application not found' });
     }
-    
-    res.json({ success: true, application, message: `Application ${status} successfully` });
+
+    res.json({ success: true, application: result.rows[0], message: `Application ${status} successfully` });
   } catch (error) {
     console.error('Review corporate application error:', error);
     res.status(500).json({ error: 'Server error' });
