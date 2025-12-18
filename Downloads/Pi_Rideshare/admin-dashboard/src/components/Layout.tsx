@@ -18,8 +18,10 @@ import {
   TrendingUp,
   Building2,
   FileText,
+  Bell,
   Camera
 } from 'lucide-react';
+
 
 export default function Layout() {
   const location = useLocation();
@@ -94,6 +96,7 @@ export default function Layout() {
     { icon: Mail, label: 'Inbox', path: '/dashboard/inbox' },
     { icon: TrendingUp, label: 'Surge Map', path: '/dashboard/surge-map' },
     { icon: Settings, label: 'Surge Control', path: '/dashboard/surge-control' },
+    { icon: Bell, label: 'Push Notifications', path: '/dashboard/push-notifications' },
   ];
 
   return (
