@@ -15,15 +15,13 @@ const DriverBadgeVerification = () => {
   // For demo purposes, simulate a rider lookup
   const handleLookupRider = async () => {
     if (!riderId.trim()) return;
-    
     setLoading(true);
     try {
-      const response = await fetch(apiUrl(`api/driver/rider-corporate-info/${riderId}`), {
-      headers: {
-    'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+      const response = await fetch(apiUrl('api/driver/rider-corporate-info/' + riderId), {
+        headers: {
+          'Authorization': 'Bearer ' + localStorage.getItem('authToken')
         }
       });
-      
       if (response.ok) {
         const data = await response.json();
         setRiderInfo(data);

@@ -30,6 +30,8 @@ import CarDemo from './pages/CarDemo';
 import AppSelector from './pages/AppSelector';
 import DownloadRider from './pages/DownloadRider';
 import DownloadDriver from './pages/DownloadDriver';
+import RiderBadgeVerification from './pages/RiderBadgeVerification';
+import PushNotifications from './pages/PushNotifications';
 
 export default function App() {
   return (
@@ -71,6 +73,7 @@ export default function App() {
           <Route path="disputes" element={<DisputeResolution />} />
           <Route path="corporations" element={<CorporateManagement />} />
           <Route path="corporate-applications" element={<CorporateApplications />} />
+          <Route path="rider-badge-verification" element={<RiderBadgeVerification />} />
           <Route path="driver-badge-verification" element={<DriverBadgeVerification />} />
         </Route>
       </Routes>

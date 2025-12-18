@@ -1671,6 +1671,137 @@ app.post('/api/admin/corporate-applications/:id/review', authenticateToken, asyn
 });
 
 // ============================================================================
+// BADGE VERIFICATION API ENDPOINTS
+// ============================================================================
+
+// Get all badge verifications
+app.get('/api/admin/badge-verifications', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT bv.*, 
+             u.first_name || ' ' || u.last_name as rider_name,
+             u.email as rider_email,
+             u.phone as rider_phone
+      FROM badge_verifications bv
+      LEFT JOIN users u ON bv.rider_id = u.id
+      ORDER BY bv.created_at DESC
+    `);
+    res.json({ success: true, verifications: result.rows });
+  } catch (error) {
+    console.error('Get badge verifications error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Review badge verification
+app.post('/api/admin/badge-verifications/:id/review', authenticateToken, async (req, res) => {
+  try {
+    const { verification_status, verification_notes, new_expiry_date } = req.body;
+    const verificationId = req.params.id;
+
+    const result = await db.query(`
+      UPDATE badge_verifications 
+      SET verification_status = $1::varchar,
+          verification_notes = $2,
+          new_expiry_date = $3,
+          verified_at = NOW()
+      WHERE id = $4
+      RETURNING *
+    `, [verification_status, verification_notes, new_expiry_date, verificationId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Verification not found' });
+    }
+
+    res.json({ success: true, verification: result.rows[0], message: 'Badge verification updated' });
+  } catch (error) {
+    console.error('Review badge verification error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ============================================================================
+// PUSH NOTIFICATIONS API ENDPOINTS
+// ============================================================================
+
+// Get all notifications (admin)
+app.get('/api/admin/notifications', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT n.*, 
+             u.first_name || ' ' || u.last_name as user_name,
+             u.email as user_email
+      FROM notifications n
+      LEFT JOIN users u ON n.user_id = u.id
+      ORDER BY n.created_at DESC
+      LIMIT 500
+    `);
+    res.json({ success: true, notifications: result.rows });
+  } catch (error) {
+    console.error('Get notifications error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Send notification
+app.post('/api/admin/notifications/send', authenticateToken, async (req, res) => {
+  try {
+    const { target, userId, title, message, type } = req.body;
+
+    let userIds = [];
+
+    if (target === 'single') {
+      userIds = [userId];
+    } else if (target === 'all') {
+      const users = await db.query('SELECT id FROM users');
+      userIds = users.rows.map(u => u.id);
+    } else if (target === 'drivers') {
+      const users = await db.query("SELECT id FROM users WHERE user_type = 'driver'");
+      userIds = users.rows.map(u => u.id);
+    } else if (target === 'riders') {
+      const users = await db.query("SELECT id FROM users WHERE user_type = 'rider'");
+      userIds = users.rows.map(u => u.id);
+    }
+
+    if (userIds.length === 0) {
+      return res.status(400).json({ error: 'No users found for target audience' });
+    }
+
+    // Insert notifications for each user
+    const values = userIds.map((uid, i) => 
+      `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`
+    ).join(', ');
+
+    const params = userIds.flatMap(uid => [uid, title, message, type]);
+
+    await db.query(`
+      INSERT INTO notifications (user_id, title, message, type)
+      VALUES ${values}
+    `, params);
+
+    res.json({ 
+      success: true, 
+      message: `Notification sent to ${userIds.length} user(s)`,
+      count: userIds.length
+    });
+  } catch (error) {
+    console.error('Send notification error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete notification
+app.delete('/api/admin/notifications/:id', authenticateToken, async (req, res) => {
+  try {
+    await db.query('DELETE FROM notifications WHERE id = $1', [req.params.id]);
+    res.json({ success: true, message: 'Notification deleted' });
+  } catch (error) {
+    console.error('Delete notification error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ============================================================================
 // MARKETS API ENDPOINTS
 // ============================================================================
 
