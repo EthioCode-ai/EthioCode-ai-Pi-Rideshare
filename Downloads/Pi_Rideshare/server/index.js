@@ -8856,10 +8856,13 @@ app.get('/api/driver/rider-corporate-info/:search', authenticateToken, async (re
         JOIN users u ON ca.rider_id = u.id
         JOIN corporations c ON ca.corporation_id = c.id
         WHERE ca.status = 'approved'
-          AND (LOWER(u.first_name) LIKE LOWER($1) OR LOWER(u.last_name) LIKE LOWER($1)
-               OR LOWER(u.first_name || ' ' || u.last_name) LIKE LOWER($1))
-        ORDER BY ca.created_at DESC
-        LIMIT 10
+               AND (LOWER(u.first_name) LIKE LOWER($1) 
+               OR LOWER(u.last_name) LIKE LOWER($1)
+               OR LOWER(u.first_name || ' ' || u.last_name) LIKE LOWER($1)
+               OR LOWER(u.email) LIKE LOWER($1)
+               OR LOWER(ca.work_email) LIKE LOWER($1))
+               ORDER BY ca.created_at DESC
+            LIMIT 10
       `;
       params = ['%' + search + '%'];
     }
