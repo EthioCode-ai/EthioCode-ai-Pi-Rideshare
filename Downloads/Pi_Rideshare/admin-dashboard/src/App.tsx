@@ -75,6 +75,7 @@ export default function App() {
           <Route path="corporate-applications" element={<CorporateApplications />} />
           <Route path="rider-badge-verification" element={<RiderBadgeVerification />} />
           <Route path="driver-badge-verification" element={<DriverBadgeVerification />} />
+          <Route path="push-notifications" element={<PushNotifications />} />
         </Route>
       </Routes>
     </Router>
