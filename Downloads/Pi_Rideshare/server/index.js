@@ -8836,7 +8836,7 @@ app.get('/api/driver/rider-corporate-info/:search', authenticateToken, async (re
         SELECT ca.id, ca.rider_id, ca.department, ca.status, ca.work_email,
                ca.work_id_image_url, ca.discount_end_date,
                u.first_name, u.last_name, u.email,
-               c.company_name, c.discount_percentage, c.discount_fixed_amount
+               c.company_name, c.discount_type, c.discount_value
         FROM corporate_applications ca
         JOIN users u ON ca.rider_id = u.id
         JOIN corporations c ON ca.corporation_id = c.id
@@ -8851,7 +8851,7 @@ app.get('/api/driver/rider-corporate-info/:search', authenticateToken, async (re
         SELECT ca.id, ca.rider_id, ca.department, ca.status, ca.work_email,
                ca.work_id_image_url, ca.discount_end_date,
                u.first_name, u.last_name, u.email,
-               c.company_name, c.discount_percentage, c.discount_fixed_amount
+               c.company_name, c.discount_type, c.discount_value
         FROM corporate_applications ca
         JOIN users u ON ca.rider_id = u.id
         JOIN corporations c ON ca.corporation_id = c.id
@@ -8882,8 +8882,8 @@ app.get('/api/driver/rider-corporate-info/:search', authenticateToken, async (re
       work_email: row.work_email,
       work_id_image_url: row.work_id_image_url,
       discount_end_date: row.discount_end_date,
-      discount_percentage: row.discount_percentage,
-      discount_fixed_amount: row.discount_fixed_amount,
+      discount_percentage: row.discount_type === 'percentage' ? row.discount_value : null,
+      discount_fixed_amount: row.discount_type === 'fixed' ? row.discount_value : null,
       status: row.status
     });
     
