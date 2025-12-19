@@ -1,5 +1,12 @@
 require('dotenv').config();
 
+const OpenAI = require('openai');
+
+// Initialize OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 // Production environment configuration
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -356,6 +363,148 @@ app.post('/api/create-payment-intent', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================
+// GOOGLE PLACES API ENDPOINTS
+// ============================================
+
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyCYJnVS_4EdeLrxACl4W5eTOCQiwgYTk28';
+
+// Places Autocomplete
+app.get('/api/places/autocomplete', authenticateToken, async (req, res) => {
+  try {
+    const { input, latitude, longitude } = req.query;
+
+    if (!input) {
+      return res.status(400).json({ error: 'Input is required' });
+    }
+
+    let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${GOOGLE_MAPS_API_KEY}&types=establishment|geocode`;
+
+    // Bias results to user's location if provided
+    if (latitude && longitude) {
+      url += `&location=${latitude},${longitude}&radius=50000`;
+    }
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status === 'OK' || data.status === 'ZERO_RESULTS') {
+      const predictions = (data.predictions || []).map(p => ({
+        placeId: p.place_id,
+        description: p.description,
+        mainText: p.structured_formatting?.main_text || p.description.split(',')[0],
+        secondaryText: p.structured_formatting?.secondary_text || p.description.split(',').slice(1).join(','),
+      }));
+
+      res.json({ success: true, predictions });
+    } else {
+      console.error('Places API error:', data.status, data.error_message);
+      res.status(400).json({ error: 'Failed to fetch suggestions' });
+    }
+  } catch (error) {
+    console.error('Autocomplete error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Place Details - get coordinates from place ID
+app.get('/api/places/details', authenticateToken, async (req, res) => {
+  try {
+    const { placeId } = req.query;
+
+    if (!placeId) {
+      return res.status(400).json({ error: 'Place ID is required' });
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry&key=${GOOGLE_MAPS_API_KEY}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status === 'OK' && data.result) {
+      const place = {
+        placeId,
+        name: data.result.name,
+        address: data.result.formatted_address,
+        latitude: data.result.geometry.location.lat,
+        longitude: data.result.geometry.location.lng,
+      };
+
+      res.json({ success: true, place });
+    } else {
+      console.error('Place details error:', data.status, data.error_message);
+      res.status(400).json({ error: 'Failed to fetch place details' });
+    }
+  } catch (error) {
+    console.error('Place details error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Reverse Geocode - get address from coordinates
+app.get('/api/places/reverse-geocode', authenticateToken, async (req, res) => {
+  try {
+    const { latitude, longitude } = req.query;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: 'Latitude and longitude are required' });
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status === 'OK' && data.results?.length > 0) {
+      res.json({ success: true, address: data.results[0].formatted_address });
+    } else {
+      res.json({ success: true, address: 'Unknown location' });
+    }
+  } catch (error) {
+    console.error('Reverse geocode error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Directions - get route between two points
+app.get('/api/places/directions', authenticateToken, async (req, res) => {
+  try {
+    const { originLat, originLng, destLat, destLng } = req.query;
+
+    if (!originLat || !originLng || !destLat || !destLng) {
+      return res.status(400).json({ error: 'Origin and destination coordinates are required' });
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originLat},${originLng}&destination=${destLat},${destLng}&key=${GOOGLE_MAPS_API_KEY}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status === 'OK' && data.routes?.length > 0) {
+      const route = data.routes[0];
+      const leg = route.legs[0];
+
+      res.json({
+        success: true,
+        route: {
+          distance: leg.distance,
+          duration: leg.duration,
+          polyline: route.overview_polyline.points,
+          steps: leg.steps.map(s => ({
+            instruction: s.html_instructions.replace(/<[^>]*>/g, ''),
+            distance: s.distance,
+            duration: s.duration,
+          })),
+        },
+      });
+    } else {
+      res.status(400).json({ error: 'No route found' });
+    }
+  } catch (error) {
+    console.error('Directions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Serve static files from the React build (if available)
 if (process.env.NODE_ENV === 'production') {
@@ -10110,6 +10259,449 @@ app.get('/api/admin/surge/current-status', authenticateToken, async (req, res) =
   } catch (error) {
     console.error('Error fetching surge status:', error);
     res.status(500).json({ error: 'Failed to fetch surge status' });
+  }
+});
+
+// ============================================
+// AI / VOICE ENDPOINTS FOR RIDER APP
+// ============================================
+
+// Voice command processing - converts speech to structured command
+app.post('/api/ai/process-voice', authenticateToken, async (req, res) => {
+  try {
+    const { transcript } = req.body;
+    
+    if (!transcript) {
+      return res.status(400).json({ error: 'Transcript is required' });
+    }
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an AI assistant for a rideshare app called Pi VIP. Parse the user's voice command and extract structured data.
+          
+          Return JSON in this exact format:
+          {
+            "type": "book_ride" | "go_to" | "schedule" | "check_surge" | "cancel" | "unknown",
+            "destination": "extracted destination or null",
+            "time": "extracted time or null",
+            "vehicleType": "economy" | "standard" | "xl" | "premium" | null,
+            "response": "natural language response to speak back to user"
+          }
+          
+          Examples:
+          - "Take me to the airport" → type: "go_to", destination: "airport"
+          - "Book an XL to downtown" → type: "book_ride", vehicleType: "xl", destination: "downtown"
+          - "Schedule a ride for tomorrow at 8am" → type: "schedule", time: "tomorrow 8am"
+          - "What's the surge right now?" → type: "check_surge"
+          `
+        },
+        {
+          role: 'user',
+          content: transcript
+        }
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 200,
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content);
+    res.json({ success: true, command: result });
+  } catch (error) {
+    console.error('Voice processing error:', error);
+    res.status(500).json({ error: 'Failed to process voice command' });
+  }
+});
+
+// AI ride recommendations - optimal time, vehicle, surge prediction
+app.post('/api/ai/ride-recommendation', authenticateToken, async (req, res) => {
+  try {
+    const { pickup, destination, currentSurge, userPreferences, rideHistory } = req.body;
+
+    // Get current surge data
+    const surgeResult = await db.query(`
+      SELECT multiplier, surge_amount 
+      FROM surge_zones 
+      WHERE active = true 
+      ORDER BY multiplier DESC 
+      LIMIT 1
+    `);
+    
+    const currentSurgeMultiplier = surgeResult.rows[0]?.multiplier || 1.0;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an AI assistant for Pi VIP rideshare. Analyze the ride request and provide smart recommendations.
+          
+          Return JSON in this exact format:
+          {
+            "suggestedDeparture": "now" | "wait X minutes",
+            "waitTimeMinutes": number or 0,
+            "predictedSurge": number (multiplier like 1.0, 1.5),
+            "potentialSavings": number in dollars,
+            "recommendedVehicle": "economy" | "standard" | "xl" | "premium",
+            "reason": "brief explanation for the recommendation",
+            "tips": ["tip 1", "tip 2"]
+          }
+          
+          Consider:
+          - Current surge: ${currentSurgeMultiplier}x
+          - Time of day patterns (rush hours 7-9am, 5-7pm typically have surge)
+          - User preferences if provided
+          - Typical surge drops after 15-30 minutes during peak times
+          `
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            pickup,
+            destination,
+            currentSurge: currentSurgeMultiplier,
+            currentTime: new Date().toISOString(),
+            userPreferences: userPreferences || {},
+            recentRides: rideHistory?.slice(0, 5) || []
+          })
+        }
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 300,
+    });
+
+    const recommendation = JSON.parse(completion.choices[0].message.content);
+    res.json({ success: true, recommendation });
+  } catch (error) {
+    console.error('AI recommendation error:', error);
+    res.status(500).json({ error: 'Failed to get recommendation' });
+  }
+});
+
+// Smart destination suggestions based on history and time
+app.get('/api/ai/suggestions', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const currentHour = new Date().getHours();
+    const dayOfWeek = new Date().getDay();
+
+    // Get user's ride history
+    const historyResult = await db.query(`
+      SELECT destination_address, destination_lat, destination_lng, 
+             EXTRACT(HOUR FROM created_at) as hour,
+             EXTRACT(DOW FROM created_at) as dow,
+             COUNT(*) as trip_count
+      FROM rides 
+      WHERE rider_id = $1 AND status = 'completed'
+      GROUP BY destination_address, destination_lat, destination_lng, 
+               EXTRACT(HOUR FROM created_at), EXTRACT(DOW FROM created_at)
+      ORDER BY trip_count DESC
+      LIMIT 20
+    `, [userId]);
+
+    // Get saved places
+    const savedPlaces = await db.query(`
+      SELECT name, label, address, latitude, longitude
+      FROM saved_places
+      WHERE user_id = $1
+    `, [userId]);
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `Analyze the user's ride patterns and suggest the most likely destinations right now.
+          
+          Return JSON array of top 3 suggestions:
+          [
+            {
+              "name": "destination name",
+              "address": "full address",
+              "latitude": number,
+              "longitude": number,
+              "reason": "why this is suggested",
+              "confidence": "high" | "medium" | "low"
+            }
+          ]
+          
+          Current time: ${currentHour}:00, Day: ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dayOfWeek]}
+          `
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            rideHistory: historyResult.rows,
+            savedPlaces: savedPlaces.rows,
+            currentHour,
+            dayOfWeek
+          })
+        }
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 400,
+    });
+
+    const suggestions = JSON.parse(completion.choices[0].message.content);
+    res.json({ success: true, suggestions: suggestions.suggestions || suggestions });
+  } catch (error) {
+    console.error('AI suggestions error:', error);
+    res.status(500).json({ error: 'Failed to get suggestions' });
+  }
+});
+
+// Calendar-based ride suggestions
+app.post('/api/ai/calendar-suggestions', authenticateToken, async (req, res) => {
+  try {
+    const { events } = req.body; // Calendar events from client
+    const userId = req.user.id;
+
+    if (!events || events.length === 0) {
+      return res.json({ success: true, suggestions: [] });
+    }
+
+    // Get user's home/work locations
+    const savedPlaces = await db.query(`
+      SELECT name, label, address, latitude, longitude
+      FROM saved_places
+      WHERE user_id = $1 AND label IN ('home', 'work')
+    `, [userId]);
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `Analyze calendar events and suggest optimal ride times.
+          
+          For each event with a location, calculate:
+          - When to leave (accounting for ~15-20 min ride + 5 min buffer)
+          - Suggest avoiding surge times if possible
+          - Recommend vehicle type based on meeting importance
+          
+          Return JSON:
+          {
+            "suggestions": [
+              {
+                "eventId": "id",
+                "eventTitle": "title",
+                "departureTime": "ISO timestamp",
+                "destination": "event location",
+                "vehicleRecommendation": "standard" | "premium",
+                "tip": "helpful tip about this ride"
+              }
+            ]
+          }
+          `
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            events,
+            savedPlaces: savedPlaces.rows,
+            currentTime: new Date().toISOString()
+          })
+        }
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 500,
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content);
+    res.json({ success: true, suggestions: result.suggestions || [] });
+  } catch (error) {
+    console.error('Calendar suggestions error:', error);
+    res.status(500).json({ error: 'Failed to get calendar suggestions' });
+  }
+});
+
+// Surge prediction endpoint
+app.get('/api/ai/surge-prediction', authenticateToken, async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+
+    // Get historical surge data
+    const historicalSurge = await db.query(`
+      SELECT 
+        EXTRACT(HOUR FROM recorded_at) as hour,
+        AVG(multiplier) as avg_multiplier
+      FROM surge_history
+      WHERE recorded_at > NOW() - INTERVAL '7 days'
+      GROUP BY EXTRACT(HOUR FROM recorded_at)
+      ORDER BY hour
+    `);
+
+    // Get current surge
+    const currentSurge = await db.query(`
+      SELECT multiplier, surge_amount
+      FROM surge_zones
+      WHERE active = true
+      AND ST_DWithin(
+        ST_MakePoint(center_lng, center_lat)::geography,
+        ST_MakePoint($1, $2)::geography,
+        2000
+      )
+      ORDER BY multiplier DESC
+      LIMIT 1
+    `, [lng || -94.1861, lat || 36.1540]);
+
+    const currentMultiplier = currentSurge.rows[0]?.multiplier || 1.0;
+    const currentHour = new Date().getHours();
+
+    // Simple prediction based on historical patterns
+    const nextHourData = historicalSurge.rows.find(h => h.hour === (currentHour + 1) % 24);
+    const predictedMultiplier = nextHourData?.avg_multiplier || currentMultiplier;
+
+    res.json({
+      success: true,
+      current: {
+        multiplier: currentMultiplier,
+        surgeAmount: currentSurge.rows[0]?.surge_amount || '$0'
+      },
+      prediction: {
+        multiplier: Math.round(predictedMultiplier * 10) / 10,
+        timeframe: '30 minutes',
+        trend: predictedMultiplier > currentMultiplier ? 'increasing' : 
+               predictedMultiplier < currentMultiplier ? 'decreasing' : 'stable',
+        recommendation: currentMultiplier > 1.3 && predictedMultiplier < currentMultiplier 
+          ? `Wait ${Math.round((currentMultiplier - 1) * 10)} minutes to save money`
+          : 'Good time to book'
+      }
+    });
+  } catch (error) {
+    console.error('Surge prediction error:', error);
+    res.status(500).json({ error: 'Failed to predict surge' });
+  }
+});
+
+// ============================================
+// FLIGHT TRACKING ENDPOINT
+// ============================================
+
+// Track flight status for airport pickups
+app.get('/api/flights/status', authenticateToken, async (req, res) => {
+  try {
+    const { flightNumber, date } = req.query;
+
+    if (!flightNumber) {
+      return res.status(400).json({ error: 'Flight number is required' });
+    }
+
+    // Parse flight number (e.g., "AA123" → airline "AA", flight "123")
+    const match = flightNumber.match(/^([A-Z]{2})(\d+)$/i);
+    if (!match) {
+      return res.status(400).json({ error: 'Invalid flight number format. Use format like AA123' });
+    }
+
+    const airlineCode = match[1].toUpperCase();
+    const flightNum = match[2];
+
+    const apiKey = process.env.AVIATIONSTACK_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Flight tracking not configured' });
+    }
+
+    // Call AviationStack API
+    const response = await fetch(
+      `http://api.aviationstack.com/v1/flights?access_key=${apiKey}&airline_iata=${airlineCode}&flight_number=${flightNum}`
+    );
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('AviationStack error:', data.error);
+      return res.status(400).json({ error: 'Unable to fetch flight data' });
+    }
+
+    if (!data.data || data.data.length === 0) {
+      return res.json({ 
+        success: true, 
+        flight: null, 
+        message: 'Flight not found or not yet scheduled' 
+      });
+    }
+
+    // Get the most relevant flight (today's or specified date)
+    const flight = data.data[0];
+
+    const flightInfo = {
+      flightNumber: `${flight.airline?.iata || airlineCode}${flight.flight?.number || flightNum}`,
+      airline: flight.airline?.name || 'Unknown Airline',
+      status: flight.flight_status || 'unknown',
+      departure: {
+        airport: flight.departure?.airport || 'Unknown',
+        iata: flight.departure?.iata || '',
+        scheduled: flight.departure?.scheduled,
+        estimated: flight.departure?.estimated,
+        actual: flight.departure?.actual,
+        delay: flight.departure?.delay || 0,
+        terminal: flight.departure?.terminal,
+        gate: flight.departure?.gate
+      },
+      arrival: {
+        airport: flight.arrival?.airport || 'Unknown',
+        iata: flight.arrival?.iata || '',
+        scheduled: flight.arrival?.scheduled,
+        estimated: flight.arrival?.estimated,
+        actual: flight.arrival?.actual,
+        delay: flight.arrival?.delay || 0,
+        terminal: flight.arrival?.terminal,
+        gate: flight.arrival?.gate,
+        baggage: flight.arrival?.baggage
+      }
+    };
+
+    // Calculate pickup adjustment if flight is delayed
+    let pickupAdjustment = null;
+    if (flightInfo.arrival.delay > 0) {
+      pickupAdjustment = {
+        delayMinutes: flightInfo.arrival.delay,
+        recommendation: `Flight delayed by ${flightInfo.arrival.delay} minutes. Pickup time adjusted automatically.`,
+        newPickupTime: flightInfo.arrival.estimated || flightInfo.arrival.scheduled
+      };
+    }
+
+    res.json({
+      success: true,
+      flight: flightInfo,
+      pickupAdjustment
+    });
+
+  } catch (error) {
+    console.error('Flight tracking error:', error);
+    res.status(500).json({ error: 'Failed to fetch flight status' });
+  }
+});
+
+// Subscribe to flight updates for a ride
+app.post('/api/flights/track', authenticateToken, async (req, res) => {
+  try {
+    const { rideId, flightNumber } = req.body;
+    const userId = req.user.id;
+
+    if (!rideId || !flightNumber) {
+      return res.status(400).json({ error: 'Ride ID and flight number are required' });
+    }
+
+    // Update ride with flight info
+    await db.query(`
+      UPDATE rides 
+      SET flight_number = $1, 
+          flight_tracking_enabled = true,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2 AND rider_id = $3
+    `, [flightNumber.toUpperCase(), rideId, userId]);
+
+    res.json({ 
+      success: true, 
+      message: 'Flight tracking enabled. We\'ll adjust your pickup if the flight is delayed.' 
+    });
+
+  } catch (error) {
+    console.error('Flight track subscription error:', error);
+    res.status(500).json({ error: 'Failed to enable flight tracking' });
   }
 });
 
