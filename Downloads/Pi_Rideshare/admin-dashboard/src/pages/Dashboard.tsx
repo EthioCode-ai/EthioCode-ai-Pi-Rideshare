@@ -811,29 +811,46 @@ const Dashboard: React.FC = () => {
           const color = user.status === 'waiting' ? '#ef4444' :
                        user.status === 'matched' ? '#f59e0b' : '#8b5cf6';
 
+          const riderName = user.name?.split(' ')[0] || 'Rider';
           const icon = {
-            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-              <svg width="24" height="30" viewBox="0 0 24 30" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 0C5.372 0 0 5.372 0 12c0 12 12 18 12 18s12-6 12-18C24 5.372 18.628 0 12 0z" fill="${color}"/>
-                <circle cx="12" cy="12" r="6" fill="white"/>
-                <text x="12" y="16" text-anchor="middle" fill="${color}" font-size="8" font-weight="bold">👤</text>
+             url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+              <svg width="60" height="50" viewBox="0 0 60 50" xmlns="http://www.w3.org/2000/svg">
+              <path d="M30 0C23.372 0 18 5.372 18 12c0 12 12 18 12 18s12-6 12-18C42 5.372 36.628 0 30 0z" fill="${color}"/>
+              <circle cx="30" cy="12" r="6" fill="white"/>
+              <text x="30" y="16" text-anchor="middle" fill="${color}" font-size="8" font-weight="bold">👤</text>
+              <rect x="5" y="34" width="50" height="14" rx="3" fill="white" stroke="${color}" stroke-width="1"/>
+              <text x="30" y="45" text-anchor="middle" fill="#1f2937" font-size="10" font-weight="bold">${riderName}</text>
               </svg>
-            `),
-            scaledSize: new window.google.maps.Size(24, 30),
-            anchor: new window.google.maps.Point(12, 30)
-          };
+        `),
+           scaledSize: new window.google.maps.Size(60, 50),
+           anchor: new window.google.maps.Point(30, 30)
+ };
 
           const marker = new window.google.maps.Marker({
-            position: { lat: user.lat, lng: user.lng },
-            map: currentMap,
-            icon: icon,
-            title: `Rider: ${user.name}`
-          });
+           position: { lat: user.lat, lng: user.lng },
+           map: currentMap,
+           icon: icon,
+           title: `Rider: ${user.name?.split(' ')[0] || 'Rider'}`,
+           label: {
+           text: user.name?.split(' ')[0] || 'Rider',
+           color: '#1f2937',
+           fontSize: '11px',
+           fontWeight: 'bold',
+           className: 'rider-marker-label'
+       }
+    });
+
+       // Create name label that's always visible
+           const nameLabel = new window.google.maps.InfoWindow({
+            content: `<div style="background: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: #1f2937; white-space: nowrap;">${riderName}</div>`,
+            disableAutoPan: true
+            });
+            nameLabel.open(currentMap, marker);
 
           const infoWindow = new window.google.maps.InfoWindow({
             content: `
               <div style="padding: 8px; font-family: Arial, sans-serif;">
-                <div style="font-weight: bold; color: #1f2937;">👤 ${user.name}</div>
+                <div style="font-weight: bold; color: #1f2937;">👤 ${user.name?.split(' ')[0] || 'Rider'}</div>
                 <div style="font-size: 12px; color: #6b7280; margin: 4px 0;">ID: ${user.id}</div>
                 <div style="font-size: 12px; margin: 2px 0;">
                   <span style="color: ${color}; font-weight: bold;">●</span> ${user.status.toUpperCase()}
@@ -1090,7 +1107,7 @@ const Dashboard: React.FC = () => {
               }}
             >
               {showRiders ? <Eye size={14} /> : <EyeOff size={14} />}
-              Riders ({realDrivers.filter(d => d.user_type === 'rider').length})
+              Riders ({realRiders.length})
             </button>
 
             <div
@@ -1262,7 +1279,8 @@ const Dashboard: React.FC = () => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 <div>🚗 {realDrivers.filter(d => d.status === 'available').length} Available</div>
                 <div>🟡 {realDrivers.filter(d => d.status === 'busy').length} Busy</div>
-                <div>👤 {realRiders.filter(r => r.status === 'waiting').length} Waiting</div>
+                <div>👤 {realRiders.length} Total Riders</div>
+                <div>⏳ {realRiders.filter(r => r.status === 'waiting' || r.status === 'online').length} Waiting</div>
                 <div>🚗 {realRiders.filter(r => r.status === 'riding').length} Active Rides</div>
               </div>
             </div>
