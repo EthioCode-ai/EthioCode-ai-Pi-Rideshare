@@ -8048,6 +8048,24 @@ io.on('connection', (socket) => {
         timestamp: new Date().toISOString()
       });
     }
+    
+    // If rider disconnects, remove from tracking
+    if (socket.userType === 'rider' && socket.userId) {
+      console.log(`👤 Rider ${socket.userId} disconnected`);
+      
+      // Remove from global tracking
+      if (global.riderAvailability) {
+        global.riderAvailability.delete(socket.userId);
+      }
+      
+      // Broadcast updated rider list to Dashboard
+      io.emit('rider-availability-update', {
+        totalRiders: global.riderAvailability ? global.riderAvailability.size : 0,
+        riders: global.riderAvailability ? Array.from(global.riderAvailability.values()) : [],
+        disconnectedRiderId: socket.userId,
+        timestamp: new Date().toISOString()
+      });
+    }
   });
 });
 
