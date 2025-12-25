@@ -6831,13 +6831,26 @@ async function findBestDriverFallback(rideRequest) {
   const maxSearchRadius = rideType === 'premium' ? 20 : 15;
 
   try {
+    // DEBUG: What's actually in the map?
+    console.log(`🔍 DEBUG: driverAvailability map size: ${driverAvailability.size}`);
+    Array.from(driverAvailability.entries()).forEach(([id, d]) => {
+      console.log(`   Driver ${id}: isAvailable=${d.isAvailable}, lat=${d.lat}, lng=${d.lng}`);
+    });
+    // DEBUG: Log what's in driverAvailability
+    console.log(`🔍 DEBUG: driverAvailability has ${driverAvailability.size} entries`);
+    Array.from(driverAvailability.entries()).forEach(([id, driver]) => {
+      const dist = (driver.lat && driver.lng) ? calculateDistance(pickup.lat, pickup.lng, driver.lat, driver.lng) : 'N/A';
+      console.log(`   Driver ${id}: isAvailable=${driver.isAvailable}, lat=${driver.lat}, lng=${driver.lng}, distance=${dist}km`);
+    });
+    console.log(`🔍 DEBUG: Pickup location: ${pickup.lat}, ${pickup.lng}, maxRadius: ${maxSearchRadius}km`);
+
     // 🔧 CRITICAL FIX: Use driverAvailability Map instead of broken database query
     const nearbyDrivers = Array.from(driverAvailability.values())
       .filter(driver => driver.isAvailable && driver.lat && driver.lng &&
         calculateDistance(pickup.lat, pickup.lng, driver.lat, driver.lng) <= maxSearchRadius)
       .map(driver => ({
         id: driver.driverId,
-        driverId: driver.driverId, // Ensure both id and driverId are set  
+        driverId: driver.driverId, // Ensure both id and driverId are set
         first_name: driver.first_name || 'Driver',
         last_name: driver.last_name || '',
         phone: driver.phone || '',
@@ -6852,7 +6865,6 @@ async function findBestDriverFallback(rideRequest) {
     if (nearbyDrivers.length === 0) {
       return null;
     }
-
     // Simple scoring for fallback
     const scoredDrivers = nearbyDrivers.map(driver => {
       const distance = calculateDistance(pickup.lat, pickup.lng, driver.latitude, driver.longitude);
@@ -7396,15 +7408,24 @@ io.on('connection', (socket) => {
     const { driverId, status, location, vehicle, preferences } = data;
     socket.userId = driverId;
     socket.userType = 'driver';
+
+    // Cancel any pending disconnect timeout (driver reconnected)
+    if (disconnectTimeouts.has(driverId)) {
+      console.log(`✅ Driver ${driverId} reconnected - cancelling disconnect timeout`);
+      clearTimeout(disconnectTimeouts.get(driverId));
+      disconnectTimeouts.delete(driverId);
+    }
+
     socket.join(`user-${driverId}`);
     socket.join('drivers');
     console.log(`🚗 Driver ${driverId} connected. Status: ${status}`);
     console.log(`📍 Driver data received:`, JSON.stringify(data, null, 2));
+    
     // Update driver availability and location
     updateDriverAvailability(driverId, {
       isAvailable: status === 'online',
-      lat: location?.lat,
-      lng: location?.lng,
+      lat: location?.lat || location?.latitude,
+      lng: location?.lng || location?.longitude,
       heading: location?.heading,
       speed: location?.speed,
       vehicleType: vehicle?.type,
@@ -7999,47 +8020,67 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Track pending disconnect timeouts
+  const disconnectTimeouts = new Map();
+
   socket.on('disconnect', (reason) => {
     console.log('📴 User disconnected:', socket.id, 'Reason:', reason);
 
-    // If driver disconnects, mark as unavailable and remove from queues
+    // If driver disconnects, give them a grace period to reconnect
     if (socket.userType === 'driver' && socket.userId) {
-      const driverData = driverAvailability.get(socket.userId);
-
-      // Remove from airport queue if in one
-      if (driverData && driverData.currentAirport) {
-        removeDriverFromAirportQueue(socket.userId, driverData.currentAirport);
+      const driverId = socket.userId;
+      
+      console.log(`⏳ Driver ${driverId} disconnected - starting 60s grace period`);
+      
+      // Clear any existing timeout for this driver
+      if (disconnectTimeouts.has(driverId)) {
+        clearTimeout(disconnectTimeouts.get(driverId));
       }
-
-      // Update availability
-      updateDriverAvailability(socket.userId, {
-        isAvailable: false,
-        currentAirport: null
-      });
-
-      // Update database
-      db.updateDriverLocation(socket.userId, {
-        latitude: 0,
-        longitude: 0,
-        heading: 0,
-        speed: 0,
-        is_available: false
-      }).catch(console.error);
-
-      // Broadcast driver disconnection to all clients
-      const availableDriversCount = Array.from(driverAvailability.values())
-        .filter(driver => driver.isAvailable).length;
       
-      console.log(`📡 Broadcasting driver disconnect: ${availableDriversCount} drivers online`);
+      // Set a 60-second grace period before marking offline
+      const timeoutId = setTimeout(() => {
+        console.log(`⏰ Grace period expired for driver ${driverId} - marking offline`);
+        
+        const driverData = driverAvailability.get(driverId);
+
+        // Remove from airport queue if in one
+        if (driverData && driverData.currentAirport) {
+          removeDriverFromAirportQueue(driverId, driverData.currentAirport);
+        }
+
+        // Update availability
+        updateDriverAvailability(driverId, {
+          isAvailable: false,
+          currentAirport: null
+        });
+
+        // Update database
+        db.updateDriverLocation(driverId, {
+          latitude: 0,
+          longitude: 0,
+          heading: 0,
+          is_available: false
+        }).catch(console.error);
+
+        // Broadcast driver disconnection to all clients
+        const availableDriversCount = Array.from(driverAvailability.values())
+          .filter(driver => driver.isAvailable).length;
+
+        console.log(`📡 Broadcasting driver disconnect: ${availableDriversCount} drivers online`);
+
+        io.emit('driver-availability-update', {
+          totalDrivers: availableDriversCount,
+          driverId: driverId,
+          status: 'offline',
+          location: null,
+          isAvailable: false,
+          timestamp: new Date().toISOString()
+        });
+        
+        disconnectTimeouts.delete(driverId);
+      }, 15000); // 15 second grace period
       
-      io.emit('driver-availability-update', {
-        totalDrivers: availableDriversCount,
-        driverId: socket.userId,
-        status: 'offline',
-        location: null,
-        isAvailable: false,
-        timestamp: new Date().toISOString()
-      });
+      disconnectTimeouts.set(driverId, timeoutId);
     }
     
     // If rider disconnects, remove from tracking
