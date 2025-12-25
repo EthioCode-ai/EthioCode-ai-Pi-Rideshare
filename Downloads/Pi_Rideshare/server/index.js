@@ -7266,11 +7266,9 @@ io.on('connection', (socket) => {
     socket.userId = userId;
     socket.userType = userType;
     socket.join(`user-${userId}`);
-
     if (userType === 'driver') {
       socket.join('drivers');
       console.log(`🚗 Driver ${userId} joined and available for rides`);
-      
       // 🔧 CRITICAL FIX: Update database to mark driver as available when they join
       try {
         // Use direct SQL to update only the is_available field
