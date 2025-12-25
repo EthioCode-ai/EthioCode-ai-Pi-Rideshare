@@ -1,0 +1,117 @@
+import { apiUrl } from '../config/api.config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { StorageKeys } from '../constants';
+
+export interface PlacePrediction {
+  placeId: string;
+  description: string;
+  mainText: string;
+  secondaryText: string;
+}
+
+export interface PlaceDetails {
+  placeId: string;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
+class PlacesService {
+  private async getToken(): Promise<string | null> {
+    return await AsyncStorage.getItem(StorageKeys.AUTH_TOKEN);
+  }
+
+  // Autocomplete search - calls our backend which uses Google Places API
+  async autocomplete(
+    input: string,
+    location?: { latitude: number; longitude: number }
+  ): Promise<PlacePrediction[]> {
+    if (!input || input.length < 2) {
+      return [];
+    }
+
+    try {
+      const token = await this.getToken();
+      const params = new URLSearchParams({
+        input,
+        ...(location && {
+          latitude: location.latitude.toString(),
+          longitude: location.longitude.toString(),
+        }),
+      });
+
+      const response = await fetch(apiUrl(`api/places/autocomplete?${params}`), {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.predictions) {
+        return data.predictions;
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Autocomplete error:', error);
+      return [];
+    }
+  }
+
+  // Get place details (coordinates) from place ID
+  async getPlaceDetails(placeId: string): Promise<PlaceDetails | null> {
+    try {
+      const token = await this.getToken();
+      const response = await fetch(apiUrl(`api/places/details?placeId=${placeId}`), {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.place) {
+        return data.place;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Place details error:', error);
+      return null;
+    }
+  }
+
+  // Reverse geocode - get address from coordinates
+  async reverseGeocode(
+    latitude: number,
+    longitude: number
+  ): Promise<string> {
+    try {
+      const token = await this.getToken();
+      const response = await fetch(
+        apiUrl(`api/places/reverse-geocode?latitude=${latitude}&longitude=${longitude}`),
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.address) {
+        return data.address;
+      }
+
+      return 'Unknown location';
+    } catch (error) {
+      console.error('Reverse geocode error:', error);
+      return 'Unknown location';
+    }
+  }
+}
+
+export const placesService = new PlacesService();
+export default placesService;

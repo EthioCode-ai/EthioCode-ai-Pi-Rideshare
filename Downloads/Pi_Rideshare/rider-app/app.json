@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Pi VIP Rider",
+    "slug": "pi-vip-rider",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0d0d1a"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pivip.rider",
+      "config": {
+        "googleMapsApiKey": "AIzaSyCYJnVS_4EdeLrxACl4W5eTOCQiwgYTk28"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Pi VIP needs your location to find nearby drivers and provide accurate pickup.",
+        "NSLocationAlwaysUsageDescription": "Pi VIP needs your location to track your ride in the background.",
+        "NSMicrophoneUsageDescription": "Pi VIP needs microphone access for voice commands."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0d0d1a"
+      },
+      "package": "com.pivip.rider",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCYJnVS_4EdeLrxACl4W5eTOCQiwgYTk28"
+        }
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Pi VIP needs your location to find nearby drivers."
+        }
+      ],
+      "@react-native-community/datetimepicker"
+    ]
+  }
+}
