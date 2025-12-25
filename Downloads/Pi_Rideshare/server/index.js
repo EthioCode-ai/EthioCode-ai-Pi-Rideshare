@@ -7391,7 +7391,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Driver connection event with status and preferences
+ // Handle driver connection
   socket.on('driver-connect', (data) => {
     const { driverId, status, location, vehicle, preferences } = data;
     socket.userId = driverId;
@@ -7399,8 +7399,7 @@ io.on('connection', (socket) => {
     socket.join(`user-${driverId}`);
     socket.join('drivers');
     console.log(`🚗 Driver ${driverId} connected. Status: ${status}`);
-    console.log(`🔍 Driver data received:`, JSON.stringify(data, null, 2));
-
+    console.log(`📍 Driver data received:`, JSON.stringify(data, null, 2));
     // Update driver availability and location
     updateDriverAvailability(driverId, {
       isAvailable: status === 'online',
@@ -7413,16 +7412,12 @@ io.on('connection', (socket) => {
       vehicleColor: vehicle?.color,
       preferences: preferences || {}
     });
-
     // Broadcast driver availability change to all connected clients
     const availableDriversCount = Array.from(driverAvailability.values())
       .filter(driver => driver.isAvailable).length;
-    
     console.log(`📡 Broadcasting driver availability update: ${availableDriversCount} drivers online`);
-    
     // Get driver data for broadcasting
     const driverData = driverAvailability.get(driverId);
-    
     io.emit('driver-availability-update', {
       totalDrivers: availableDriversCount,
       driverId: driverId,
