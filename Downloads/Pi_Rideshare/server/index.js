@@ -2539,14 +2539,33 @@ app.post('/api/rides/request', rideLimiter, authenticateToken, async (req, res) 
       };
     }
 
+        // Fetch rider info for driver display
+    let riderFirstName = 'Rider';
+    try {
+      const riderInfo = await db.getUserById(rider_id || req.user.userId);
+      if (riderInfo && riderInfo.first_name) {
+        riderFirstName = riderInfo.first_name;
+      }
+    } catch (err) {
+      console.error('Could not fetch rider info:', err);
+    }
+
     // Store ride request for matching algorithm
     activeRideRequests.set(ride.id, {
       id: ride.id,
       pickup: pickup.coordinates,
       destination: destination.coordinates,
+      pickupAddress: pickup.address || 'Pickup Location',
+      destinationAddress: destination.address || 'Destination',
       rideType: rideType || 'standard',
       requestedAt: new Date(),
-      riderId: rider_id || req.user.userId
+      riderId: rider_id || req.user.userId,
+      riderFirstName: riderFirstName,
+      riderRating: 4.8,
+      estimatedFare: estimatedFare.total,
+      estimatedDistance: estimatedFare.estimatedDistance || 0,
+      estimatedDuration: estimatedFare.estimatedTravelTime || 5,
+      surgeMultiplier: estimatedFare.surge?.multiplier || 1
     });
 
     // Update pending requests count and broadcast
@@ -6613,22 +6632,26 @@ console.log(`💰 Driver earnings calculation: $${totalFare} × ${marketSettings
   // Send ride request to current driver with 7-second timeout
   io.to(`user-${currentDriver.id}`).emit('cascading-ride-request', {
     rideId: requestData.rideId,
-    pickup: requestData.pickup,
-    destination: requestData.destination,
-    pickupAddress: requestData.pickupAddress,
-    destinationAddress: requestData.destinationAddress,
-    estimatedFare: driverEarnings, // Show driver earnings instead of total fare
-    totalFare: totalFare, // Include total fare for reference
-    driverCommission: marketSettings.driverCommission,
-    rideType: requestData.rideType,
-    estimatedArrival: currentDriver.estimatedArrival || 5,
-    requestTimeout: 7, // 7 seconds to respond (for audio duration)
-    driverInfo: {
-      name: `${currentDriver.first_name} ${currentDriver.last_name}`,
-      rating: currentDriver.rating,
-      distance: currentDriver.distance
+    riderId: requestData.riderId,
+    riderName: requestData.riderFirstName || 'Rider',
+    riderRating: requestData.riderRating || 4.8,
+    pickup: {
+      lat: requestData.pickup.lat,
+      lng: requestData.pickup.lng,
+      address: requestData.pickupAddress
     },
-    riderPreferences: requestData.riderPreferences,
+    destination: {
+      lat: requestData.destination.lat,
+      lng: requestData.destination.lng,
+      address: requestData.destinationAddress
+    },
+    estimatedFare: driverEarnings,
+    totalFare: totalFare,
+    rideType: requestData.rideType,
+    estimatedDistance: requestData.estimatedDistance || currentDriver.distance || 0,
+    estimatedDuration: requestData.estimatedDuration || currentDriver.estimatedArrival || 5,
+    surgeMultiplier: requestData.surgeMultiplier || 1,
+    requestTimeout: 7,
     cascadeInfo: {
       attempt: currentDriverIndex + 1,
       totalDrivers: availableDrivers.length,
