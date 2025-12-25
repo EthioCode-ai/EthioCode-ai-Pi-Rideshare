@@ -56,37 +56,58 @@ const ActiveRideScreen = () => {
   const { colors, isDark } = useTheme();
   const mapRef = useRef<MapView>(null);
 
-  const { rideId } = route.params;
+  const { rideId, driver: routeDriver, pickup: routePickup, destination: routeDestination, eta: routeEta } = route.params;
 
   const [rideStatus, setRideStatus] = useState<'searching' | 'driver_assigned' | 'arriving' | 'arrived' | 'in_progress' | 'completed'>('driver_assigned');
-  const [driver, setDriver] = useState<DriverInfo>({
-    id: 'driver-1',
-    name: 'Marcus W.',
-    photo: '👤',
-    rating: 4.94,
-    vehicle: {
-      make: 'Toyota',
-      model: 'Camry',
-      color: 'Silver',
-      licensePlate: 'ABC 1234',
-    },
-    location: {
-      latitude: 36.1400,
-      longitude: -94.1900,
-      heading: 45,
-    },
+  const [driver, setDriver] = useState<DriverInfo>(() => {
+    if (routeDriver) {
+      return {
+        id: routeDriver.id || routeDriver.driverId || 'unknown',
+        name: routeDriver.name || 'Your Driver',
+        photo: '👤',
+        rating: routeDriver.rating || 5.0,
+        vehicle: {
+          make: routeDriver.vehicle?.make || '',
+          model: routeDriver.vehicle?.model || 'Vehicle',
+          color: routeDriver.vehicle?.color || '',
+          licensePlate: routeDriver.vehicle?.licensePlate || '',
+        },
+        location: {
+          latitude: routePickup?.latitude || 36.1540,
+          longitude: routePickup?.longitude || -94.1861,
+          heading: 0,
+        },
+      };
+    }
+    // Fallback for direct navigation without driver data
+    return {
+      id: 'pending',
+      name: 'Finding Driver...',
+      photo: '👤',
+      rating: 5.0,
+      vehicle: {
+        make: '',
+        model: 'Pending',
+        color: '',
+        licensePlate: '',
+      },
+      location: {
+        latitude: 36.1540,
+        longitude: -94.1861,
+        heading: 0,
+      },
+    };
   });
 
   const [pickup] = useState({
-    latitude: 36.1540,
-    longitude: -94.1861,
-    address: '229 South Main Street, Bentonville, AR',
+    latitude: routePickup!.latitude,
+    longitude: routePickup!.longitude,
+    address: routePickup?.address || '',
   });
-
   const [destination] = useState({
-    latitude: 36.2819,
-    longitude: -94.3068,
-    address: 'XNA Airport',
+    latitude: routeDestination!.latitude,
+    longitude: routeDestination!.longitude,
+    address: routeDestination?.address || '',
   });
 
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
@@ -100,7 +121,15 @@ const ActiveRideScreen = () => {
 
   useEffect(() => {
     fetchRoute();
-    simulateRide();
+    setupSocketListeners();
+
+    // Cleanup socket listeners on unmount
+    return () => {
+      socketService.removeListener('driver-location-update');
+      socketService.removeListener('driver_arrived');
+      socketService.removeListener('trip-status-update');
+      socketService.removeListener('ride-cancelled');
+    };
   }, []);
 
   const fetchRoute = async () => {
@@ -132,33 +161,50 @@ const ActiveRideScreen = () => {
     }
   };
 
-  const simulateRide = () => {
-    const interval = setInterval(() => {
+  const setupSocketListeners = () => {
+    // Listen for real-time driver location updates
+    socketService.onDriverLocationUpdate((data) => {
+      console.log('📍 Driver location update:', data);
       setDriver((prev) => ({
         ...prev,
         location: {
-          ...prev.location,
-          latitude: prev.location.latitude + 0.001,
-          longitude: prev.location.longitude + 0.0005,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          heading: data.heading || prev.location.heading,
         },
       }));
+    });
 
-      setEta((prev) => Math.max(0, prev - 0.1));
-      setDistanceTraveled((prev) => prev + 0.05);
-      setDistanceLeft((prev) => Math.max(0, prev - 0.05));
-    }, 3000);
-
-    setTimeout(() => {
-      clearInterval(interval);
-      setRideStatus('completed');
+    // Listen for driver arrived at pickup
+    socketService.onDriverArrived((data) => {
+      console.log('🚗 Driver arrived:', data);
+      setRideStatus('arrived');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      
-      setTimeout(() => {
-        navigation.replace('RideComplete', { rideId, fare });
-      }, 1500);
-    }, 60000); // Extended to 60 seconds for demo
+    });
 
-    return () => clearInterval(interval);
+    // Listen for trip status updates
+    socketService.onTripStatusUpdate((data) => {
+      console.log('🔄 Trip status update:', data);
+      if (data.status === 'in_progress') {
+        setRideStatus('in_progress');
+      } else if (data.status === 'completed') {
+        setRideStatus('completed');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setTimeout(() => {
+          navigation.replace('RideComplete', { rideId, fare });
+        }, 1500);
+      }
+    });
+
+    // Listen for ride cancellation
+    socketService.onRideCancelled((data) => {
+      console.log('❌ Ride cancelled:', data);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'MainTabs' }],
+      });
+    });
   };
 
   const handleCall = () => {
