@@ -172,7 +172,7 @@ export const ADMIN_ENDPOINTS = {
 export const SOCKET_EVENTS = {
   driver: {
     // Listen (incoming from server)
-    NEW_RIDE_REQUEST: 'new-ride-request',
+    NEW_RIDE_REQUEST: 'cascading-ride-request',
     RIDE_ACCEPTED: 'cascading-ride-accepted',
     RIDE_REJECTED: 'cascading-ride-rejected',
     RIDE_CANCELLED: 'ride-cancelled',
