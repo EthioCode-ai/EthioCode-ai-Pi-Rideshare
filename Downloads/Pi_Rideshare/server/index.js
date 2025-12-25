@@ -6843,6 +6843,7 @@ async function findBestDriver(rideRequest) {
     }
   } catch (error) {
     console.error('Real-time matching error:', error);
+    
     // Fallback to original algorithm
     return findBestDriverFallback(rideRequest);
   }
@@ -6854,26 +6855,16 @@ async function findBestDriverFallback(rideRequest) {
   const maxSearchRadius = rideType === 'premium' ? 20 : 15;
 
   try {
-    // DEBUG: What's actually in the map?
     console.log(`🔍 DEBUG: driverAvailability map size: ${driverAvailability.size}`);
-    Array.from(driverAvailability.entries()).forEach(([id, d]) => {
-      console.log(`   Driver ${id}: isAvailable=${d.isAvailable}, lat=${d.lat}, lng=${d.lng}`);
-    });
-    // DEBUG: Log what's in driverAvailability
-    console.log(`🔍 DEBUG: driverAvailability has ${driverAvailability.size} entries`);
-    Array.from(driverAvailability.entries()).forEach(([id, driver]) => {
-      const dist = (driver.lat && driver.lng) ? calculateDistance(pickup.lat, pickup.lng, driver.lat, driver.lng) : 'N/A';
-      console.log(`   Driver ${id}: isAvailable=${driver.isAvailable}, lat=${driver.lat}, lng=${driver.lng}, distance=${dist}km`);
-    });
     console.log(`🔍 DEBUG: Pickup location: ${pickup.lat}, ${pickup.lng}, maxRadius: ${maxSearchRadius}km`);
 
-    // 🔧 CRITICAL FIX: Use driverAvailability Map instead of broken database query
-    const nearbyDrivers = Array.from(driverAvailability.values())
+    // First try in-memory map
+    let nearbyDrivers = Array.from(driverAvailability.values())
       .filter(driver => driver.isAvailable && driver.lat && driver.lng &&
         calculateDistance(pickup.lat, pickup.lng, driver.lat, driver.lng) <= maxSearchRadius)
       .map(driver => ({
         id: driver.driverId,
-        driverId: driver.driverId, // Ensure both id and driverId are set
+        driverId: driver.driverId,
         first_name: driver.first_name || 'Driver',
         last_name: driver.last_name || '',
         phone: driver.phone || '',
@@ -6885,14 +6876,55 @@ async function findBestDriverFallback(rideRequest) {
 
     console.log(`🔍 Fallback found ${nearbyDrivers.length} available drivers using driverAvailability Map`);
 
+    // If map is empty, query database as backup
+    if (nearbyDrivers.length === 0) {
+      console.log(`🔍 Map empty - querying database for available drivers`);
+      try {
+        const dbResult = await db.query(`
+          SELECT u.id, u.first_name, u.last_name, u.phone, u.rating,
+                 dl.lat, dl.lng, dl.is_available
+          FROM users u
+          JOIN driver_locations dl ON u.id = dl.driver_id
+          WHERE u.user_type = 'driver' 
+            AND dl.is_available = true
+            AND dl.lat IS NOT NULL 
+            AND dl.lng IS NOT NULL
+        `);
+        
+        console.log(`🔍 Database returned ${dbResult.rows.length} available drivers`);
+        
+        nearbyDrivers = dbResult.rows
+          .filter(driver => {
+            const dist = calculateDistance(pickup.lat, pickup.lng, parseFloat(driver.lat), parseFloat(driver.lng));
+            console.log(`   DB Driver ${driver.id}: lat=${driver.lat}, lng=${driver.lng}, distance=${dist}km`);
+            return dist <= maxSearchRadius;
+          })
+          .map(driver => ({
+            id: driver.id,
+            driverId: driver.id,
+            first_name: driver.first_name || 'Driver',
+            last_name: driver.last_name || '',
+            phone: driver.phone || '',
+            rating: parseFloat(driver.rating) || 4.8,
+            latitude: parseFloat(driver.lat),
+            longitude: parseFloat(driver.lng),
+            is_available: true
+          }));
+        
+        console.log(`🔍 After distance filter: ${nearbyDrivers.length} drivers within ${maxSearchRadius}km`);
+      } catch (dbError) {
+        console.error('Database fallback query failed:', dbError);
+      }
+    }
+
     if (nearbyDrivers.length === 0) {
       return null;
     }
+
     // Simple scoring for fallback
     const scoredDrivers = nearbyDrivers.map(driver => {
       const distance = calculateDistance(pickup.lat, pickup.lng, driver.latitude, driver.longitude);
       const driverData = driverAvailability.get(driver.id) || matchingEngine.getDefaultDriverData(driver);
-
       const score = matchingEngine.calculateDriverScore(driver, driverData, distance, pickup, rideType);
 
       return {
