@@ -206,6 +206,26 @@ const speedLimiter = slowDown({
   }
 });
 
+
+// Get airports from database
+async function getAirportsFromDB() {
+  try {
+    const result = await pool.query(
+      'SELECT airport_code, airport_name, latitude, longitude, geofence_radius_km FROM airport_zones WHERE is_active = true'
+    );
+    return result.rows.map(row => ({
+      name: `${row.airport_code} - ${row.airport_name}`,
+      code: row.airport_code,
+      lat: parseFloat(row.latitude),
+      lng: parseFloat(row.longitude),
+      radius: parseFloat(row.geofence_radius_km)
+    }));
+  } catch (error) {
+    console.error('Error fetching airports from DB:', error);
+    return [];
+  }
+}
+
 // Apply rate limiting
 app.use('/api', generalLimiter);
 app.use('/api', speedLimiter);
@@ -5652,13 +5672,14 @@ app.put('/api/settings/pricing', (req, res) => {
 });
 
 // Helper function to get nearby airport
-function getNearbyAirport(lat, lng) {
-  for (const airport of AIRPORT_LOCATIONS) {
+async function getNearbyAirport(lat, lng) {
+  const airports = await getAirportsFromDB();
+  for (const airport of airports) {
     const distance = calculateDistance(lat, lng, airport.lat, airport.lng);
     if (distance <= airport.radius) {
       return {
         name: airport.name,
-        code: airport.name.split(' - ')[0] || airport.name.substring(0, 3).toUpperCase(),
+        code: airport.code,
         distance
       };
     }
@@ -9031,11 +9052,12 @@ app.get('/api/driver/tax-documents', authenticateToken, async (req, res) => {
 });
 
 // Airport Queue API Routes
-app.get('/api/airports/queues', (req, res) => {
+app.get('/api/airports/queues', async (req, res) => {
   try {
+    const airports = await getAirportsFromDB();
     const queueStatus = {};
 
-    AIRPORT_LOCATIONS.forEach(airport => {
+    airports.forEach(airport => {
       const queue = airportDriverQueues.get(airport.name) || [];
       queueStatus[airport.name] = {
         name: airport.name,
