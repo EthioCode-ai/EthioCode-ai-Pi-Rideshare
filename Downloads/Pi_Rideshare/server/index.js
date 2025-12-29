@@ -3285,6 +3285,15 @@ app.post('/api/rides/:rideId/cancel', authenticateToken, async (req, res) => {
         timestamp: new Date().toISOString()
       });
     }
+  // Also clear cascading request if in progress
+    if (cascadingRequests.has(rideId)) {
+      const cascadeData = cascadingRequests.get(rideId);
+      if (cascadeData && cascadeData.currentTimeout) {
+        clearTimeout(cascadeData.currentTimeout);
+      }
+      cascadingRequests.delete(rideId);
+      console.log(`🔄 Cleared cascading request for cancelled ride ${rideId}`);
+    }
 
     // Notify all parties
     const cancellationData = {
@@ -8403,6 +8412,154 @@ app.get('/api/driver/payout-methods', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// Driver Settings API
+// ═══════════════════════════════════════════════════════════════════════
+
+// Get driver settings
+app.get('/api/driver/settings/:driverId', authenticateToken, async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    
+    // Security: Ensure driver can only access their own settings
+    if (req.user.userId !== driverId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Get driver settings
+    const settingsResult = await pool.query(
+      'SELECT * FROM driver_settings WHERE driver_id = $1',
+      [driverId]
+    );
+
+    // Get admin settings
+    const adminResult = await pool.query(
+      'SELECT setting_key, setting_value FROM admin_settings'
+    );
+
+    const adminSettings = {};
+    adminResult.rows.forEach(row => {
+      adminSettings[row.setting_key] = row.setting_value;
+    });
+
+    if (settingsResult.rows.length === 0) {
+      // Return defaults if no settings exist
+      return res.json({
+        settings: {
+          voiceGuidance: true,
+          acceptCash: false,
+          longTrips: true,
+          poolRides: true,
+          autoAccept: false,
+          acceptPets: false,
+          acceptTeens: false,
+          notifications: true,
+        },
+        adminSettings: {
+          cashEnabled: adminSettings.cash_enabled ?? true,
+          poolEnabled: adminSettings.pool_enabled ?? true,
+        }
+      });
+    }
+
+    const row = settingsResult.rows[0];
+    res.json({
+      settings: {
+        voiceGuidance: row.voice_guidance,
+        acceptCash: row.accept_cash,
+        longTrips: row.long_trips,
+        poolRides: row.pool_rides,
+        autoAccept: row.auto_accept,
+        acceptPets: row.accept_pets,
+        acceptTeens: row.accept_teens,
+        notifications: row.notifications,
+      },
+      adminSettings: {
+        cashEnabled: adminSettings.cash_enabled ?? true,
+        poolEnabled: adminSettings.pool_enabled ?? true,
+      }
+    });
+  } catch (error) {
+    console.error('Get driver settings error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update driver settings
+app.put('/api/driver/settings/:driverId', authenticateToken, async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const { settings } = req.body;
+
+    // Security: Ensure driver can only update their own settings
+    if (req.user.userId !== driverId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Upsert settings
+    await pool.query(`
+      INSERT INTO driver_settings (
+        driver_id, voice_guidance, accept_cash, long_trips, pool_rides,
+        auto_accept, accept_pets, accept_teens, notifications, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+      ON CONFLICT (driver_id) DO UPDATE SET
+        voice_guidance = $2,
+        accept_cash = $3,
+        long_trips = $4,
+        pool_rides = $5,
+        auto_accept = $6,
+        accept_pets = $7,
+        accept_teens = $8,
+        notifications = $9,
+        updated_at = CURRENT_TIMESTAMP
+    `, [
+      driverId,
+      settings.voiceGuidance ?? true,
+      settings.acceptCash ?? false,
+      settings.longTrips ?? true,
+      settings.poolRides ?? true,
+      settings.autoAccept ?? false,
+      settings.acceptPets ?? false,
+      settings.acceptTeens ?? false,
+      settings.notifications ?? true,
+    ]);
+
+    res.json({ success: true, message: 'Settings updated' });
+  } catch (error) {
+    console.error('Update driver settings error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Admin: Update admin settings
+app.put('/api/admin/settings', authenticateToken, async (req, res) => {
+  try {
+    // Check if user is admin
+    const userResult = await pool.query(
+      'SELECT user_type FROM users WHERE id = $1',
+      [req.user.userId]
+    );
+    
+    if (userResult.rows[0]?.user_type !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const { settingKey, settingValue } = req.body;
+
+    await pool.query(`
+      UPDATE admin_settings 
+      SET setting_value = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE setting_key = $2
+    `, [settingValue, settingKey]);
+
+    res.json({ success: true, message: 'Admin setting updated' });
+  } catch (error) {
+    console.error('Update admin settings error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 // Duplicate route removed - using the correct apiKeyMiddleware version above
 

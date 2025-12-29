@@ -538,6 +538,46 @@ const initializeDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp);
     `);
 
+// Driver Settings table - Store driver preferences
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS driver_settings (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        driver_id UUID REFERENCES users(id) UNIQUE NOT NULL,
+        voice_guidance BOOLEAN DEFAULT true,
+        accept_cash BOOLEAN DEFAULT false,
+        long_trips BOOLEAN DEFAULT true,
+        pool_rides BOOLEAN DEFAULT true,
+        auto_accept BOOLEAN DEFAULT false,
+        accept_pets BOOLEAN DEFAULT false,
+        accept_teens BOOLEAN DEFAULT false,
+        notifications BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Admin Settings table - Admin-controlled options
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        setting_key VARCHAR(100) UNIQUE NOT NULL,
+        setting_value BOOLEAN DEFAULT false,
+        description TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Insert default admin settings
+    await client.query(`
+      INSERT INTO admin_settings (setting_key, setting_value, description)
+      VALUES 
+        ('cash_enabled', true, 'Allow drivers to accept cash payments'),
+        ('pool_enabled', true, 'Allow pool/shared rides')
+      ON CONFLICT (setting_key) DO NOTHING;
+    `);
+
+
+
     // Create demo users for testing (Demo Driver removed - only real drivers now)
     await client.query(`
       INSERT INTO users (id, email, password_hash, first_name, last_name, phone, user_type, is_verified, rating, total_rides)
