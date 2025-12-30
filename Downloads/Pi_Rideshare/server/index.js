@@ -4322,6 +4322,24 @@ app.post('/api/plaid/verify-account', authenticateToken, async (req, res) => {
       ]
     );
 
+    // Also add to driver_payout_methods for payout flow
+    await db.query(
+      `INSERT INTO driver_payout_methods 
+       (driver_id, method_type, account_name, account_number_masked, routing_number_masked, is_default, is_verified, external_account_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (driver_id, external_account_id) DO NOTHING`,
+      [
+        req.user.userId,
+        'bank_account',
+        `${account.institution_name} ${selectedAccount.subtype}`,
+        `****${numbers.account.slice(-4)}`,
+        `****${numbers.routing.slice(-4)}`,
+        true,
+        true,
+        paymentMethod.id
+      ]
+    );
+
     res.json({
       success: true,
       paymentMethod: {
