@@ -8341,7 +8341,7 @@ app.get('/api/driver/earnings/detailed', authenticateToken, async (req, res) => 
 // Payout Routes
 app.post('/api/driver/payouts', authenticateToken, async (req, res) => {
   try {
-    const { amount, payoutMethodId } = req.body;
+    const { amount, payoutMethodId, payoutType = 'instant' } = req.body;
     const driverId = req.user.userId;
 
     // Check available balance
@@ -8350,26 +8350,31 @@ app.post('/api/driver/payouts', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Insufficient balance' });
     }
 
-    // Calculate fees (example: $0.50 for instant payout)
-    const fee = 0.50;
+    // Calculate fees: $0.50 for instant, $0.00 for weekly
+    const fee = payoutType === 'weekly' ? 0 : 0.50;
     const netAmount = amount - fee;
+    const initialStatus = payoutType === 'weekly' ? 'scheduled' : 'pending';
 
     const payout = await db.createPayout({
       driver_id: driverId,
       amount,
       fee,
       net_amount: netAmount,
-      payout_method_id: payoutMethodId
+      payout_method_id: payoutMethodId,
+      status: initialStatus
     });
 
     // In real implementation, integrate with payment processor
-    // For demo, mark as completed after 2 seconds
-    setTimeout(async () => {
-      await db.query(
-        'UPDATE driver_payouts SET status = $1, completed_at = CURRENT_TIMESTAMP WHERE id = $2',
-        ['completed', payout.id]
-      );
-    }, 2000);
+    // For instant payouts: mark as completed after 2 seconds (simulated)
+    // For weekly payouts: stays 'scheduled' until batch processing
+    if (payoutType === 'instant') {
+      setTimeout(async () => {
+        await db.query(
+          'UPDATE driver_payouts SET status = $1, completed_at = CURRENT_TIMESTAMP WHERE id = $2',
+          ['completed', payout.id]
+        );
+      }, 2000);
+    }
 
     res.status(201).json({
       message: 'Payout initiated successfully',
