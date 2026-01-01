@@ -5854,7 +5854,7 @@ app.post('/api/rides/estimate', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 app.post('/api/routes/calculate', authenticateToken, async (req, res) => {
   try {
-    const { driverLocation, pickup, destination, refreshRoute } = req.body;
+    const { driverLocation, pickup, destination, refreshRoute, rideStatus } = req.body;
     
     console.log('🗺️ Route calculation request:', { driverLocation, pickup, destination, refreshRoute });
     
@@ -5894,8 +5894,9 @@ app.post('/api/routes/calculate', authenticateToken, async (req, res) => {
       toPickupRoute.distanceMiles
     );
     
-    // Calculate route to destination
-    const toDestinationRoute = await calculateEnhancedRoute(pickup, destination);
+    // Calculate route to destination - use driver's current position if in_trip
+    const toDestinationOrigin = rideStatus === 'in_trip' ? driverLocation : pickup;
+    const toDestinationRoute = await calculateEnhancedRoute(toDestinationOrigin, destination);
     const toDestinationETA = calculateAdjustedETA(
       toDestinationRoute.baseDurationMinutes,
       trafficMultiplier,
