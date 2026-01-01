@@ -4789,8 +4789,11 @@ async function calculateEnhancedRoute(origin, destination) {
       return createFallbackRoute(origin, destination);
     }
     
+    const originStr = origin.heading !== undefined && origin.heading !== null 
+      ? `heading=${Math.round(origin.heading)}:${origin.lat},${origin.lng}`
+      : `${origin.lat},${origin.lng}`;
     const url = `https://maps.googleapis.com/maps/api/directions/json?` +
-      `origin=${origin.lat},${origin.lng}&` +
+      `origin=${originStr}&` +
       `destination=${destination.lat},${destination.lng}&` +
       `mode=driving&` +
       `departure_time=now&` +

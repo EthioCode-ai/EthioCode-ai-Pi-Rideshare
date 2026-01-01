@@ -31,6 +31,8 @@ import socketService from '../services/socket.service';
 import apiService from '../services/api.service';
 import StatusRow from '../components/ActiveRide/StatusRow';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Speech from 'expo-speech';
+import { StorageKeys } from '../constants/StorageKeys';
 
 // Types
 import {
@@ -88,13 +90,21 @@ const ActiveRideScreen: React.FC = () => {
   const [navigationSteps, setNavigationSteps] = useState<NavigationStep[]>([]);
   const navigationStepsRef = useRef<NavigationStep[]>([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const currentStepIndexRef = useRef(0);
   const [eta, setEta] = useState('');
   const [totalDistance, setTotalDistance] = useState('');
+  const [voiceGuidanceEnabled, setVoiceGuidanceEnabled] = useState(true);
+  const lastSpokenStepRef = useRef<number>(-1);
   // Next action (turn-by-turn) - separate from total
   const [nextActionEta, setNextActionEta] = useState('');
   const [nextActionDistance, setNextActionDistance] = useState('');
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(true);
   const [bottomCardExpanded, setBottomCardExpanded] = useState(false);
+
+  // Rerouting state
+  const lastRerouteTimeRef = useRef<number>(0);
+  const lastRouteRefreshRef = useRef<number>(0);
+  const isReroutingRef = useRef<boolean>(false);
   
   // Geofence state
   const [isWithinGeofence, setIsWithinGeofence] = useState(false);
@@ -134,16 +144,56 @@ useEffect(() => {
     console.log('🚗 ActiveRideScreen mounted');
     initializeScreen();
 
+   
+    
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
       handleBackPress();
       return true;
     });
 
+    // Listen for rider cancellation
+    socketService.onRideCancelled((data) => {
+      console.log('❌ Rider cancelled the ride:', data);
+      Alert.alert(
+        'Ride Cancelled',
+        'The rider has cancelled this ride.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Home', params: { stayOnline: true } }],
+              });
+            },
+          },
+        ]
+      );
+    });
+
     return () => {
       backHandler.remove();
       locationService.stopWatchingLocation();
+      socketService.off('ride-cancelled');
     };
   }, []);
+
+
+   // Load voice guidance setting
+useEffect(() => {
+  const loadVoiceSetting = async () => {
+    try {
+      const localSettings = await AsyncStorage.getItem('@driver_settings');
+      if (localSettings) {
+        const settings = JSON.parse(localSettings);
+        setVoiceGuidanceEnabled(settings.voiceGuidance ?? true);
+      }
+    } catch (error) {
+      console.log('Error loading voice setting:', error);
+    }
+  };
+  loadVoiceSetting();
+}, []);
 
   const initializeScreen = async () => {
   console.log('📦 routeData received:', JSON.stringify(routeData, null, 2));
@@ -184,6 +234,19 @@ useEffect(() => {
       setNavigationSteps(steps);
       navigationStepsRef.current = steps;
       console.log('📍 Navigation steps:', steps.length);
+      
+      // Speak first instruction
+      console.log('🔊 Voice check - steps:', steps.length, 'instruction:', steps[0]?.instruction?.substring(0, 50));
+      if (steps.length > 0 && steps[0].instruction) {
+        console.log('🔊 Will speak in 1 second...');
+        setTimeout(() => {
+          console.log('🔊 Speaking now:', steps[0].instruction.substring(0, 50));
+          speakInstruction(steps[0].instruction);
+          lastSpokenStepRef.current = 0;
+        }, 1000);
+      } else {
+        console.log('🔊 No steps or no instruction to speak');
+      }
     }
     
     // Set ETA and distance
@@ -227,6 +290,14 @@ useEffect(() => {
           });
         }
 
+       // Refresh route from Google every 3 seconds (real-time navigation)
+        const now = Date.now();
+        if (now - lastRouteRefreshRef.current > 3000) {
+          lastRouteRefreshRef.current = now;
+          refreshRouteFromGoogle(location);
+        }
+
+
         // Check geofence for arrival
         checkGeofence(location);
         
@@ -234,8 +305,8 @@ useEffect(() => {
         checkStepProgression(location);
       },
       {
-        distanceInterval: 10,
-        timeInterval: 3000,
+        distanceInterval: 5,
+        timeInterval: 500,
       }
     );
   };
@@ -267,6 +338,7 @@ useEffect(() => {
           driverLocation: {
             lat: currentLocation.latitude,
             lng: currentLocation.longitude,
+            heading: currentLocation.heading,
           },
           pickup: {
             lat: ride.pickup.lat,
@@ -338,6 +410,34 @@ useEffect(() => {
     }
   };
 
+
+    // Voice guidance
+  const speakInstruction = (instruction: string) => {
+  console.log('🔊 speakInstruction called, voiceEnabled:', voiceGuidanceEnabled);
+  if (!voiceGuidanceEnabled) {
+    console.log('🔊 Voice guidance disabled, skipping');
+    return;
+  }
+    try {
+      const cleanText = instruction
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .trim();
+      
+      if (cleanText) {
+        Speech.stop();
+        Speech.speak(cleanText, {
+          language: 'en-US',
+          rate: 0.9,
+          pitch: 1.0,
+        });
+      }
+    } catch (error) {
+      console.log('Speech error:', error);
+    }
+  };
+
+  
   // ==================== STEP PROGRESSION ====================
 
   const checkStepProgression = (location: Location) => {
@@ -348,7 +448,7 @@ useEffect(() => {
 
   // ========== STEP ADVANCEMENT (with catch-up) ==========
   // Find the correct current step based on position
-  let newStepIndex = currentStepIndex;
+  let newStepIndex = currentStepIndexRef.current;
 
   for (let i = currentStepIndex; i < steps.length - 1; i++) {
     const thisStep = steps[i];
@@ -379,10 +479,18 @@ useEffect(() => {
     }
   }
 
-  if (newStepIndex !== currentStepIndex) {
-    console.log(`📍 Advancing from step ${currentStepIndex + 1} to ${newStepIndex + 1}`);
+  if (newStepIndex !== currentStepIndexRef.current) {
+    console.log(`📍 Advancing from step ${currentStepIndexRef.current + 1} to ${newStepIndex + 1}`);
+    currentStepIndexRef.current = newStepIndex;
     setCurrentStepIndex(newStepIndex);
-  }
+    
+    // Speak the new instruction
+    const newStep = steps[newStepIndex];
+    if (newStep?.instruction && newStepIndex !== lastSpokenStepRef.current) {
+      lastSpokenStepRef.current = newStepIndex;
+      // speakInstruction(newStep.instruction);  // Temporarily disabled
+    }
+}
 
   // ========== Use the correct step for calculations ==========
   const activeStepIndex = newStepIndex;
@@ -391,7 +499,27 @@ useEffect(() => {
   console.log(`📍 Active step endLocation:`, currentStep?.endLocation);
 
   if (!currentStep?.endLocation) {
-    console.log(`📍 No endLocation for step ${activeStepIndex}`);
+    console.log(`📍 No endLocation for step ${activeStepIndex}, using target fallback`);
+    // Fallback: calculate directly to target
+    const target = rideRef.current.status === 'en_route_to_pickup' 
+      ? rideRef.current.pickup 
+      : rideRef.current.destination;
+    
+    const directDistance = haversineDistance(
+      location.latitude,
+      location.longitude,
+      target.lat,
+      target.lng
+    );
+    
+    // Update total distance
+    const totalMiles = directDistance / 1609.34;
+    setTotalDistance(totalMiles > 0.1 ? `${totalMiles.toFixed(1)} mi` : `${Math.round(directDistance * 3.28084)} ft`);
+    
+    // Update ETA (assuming 25 mph average)
+    const etaMinutes = Math.round((totalMiles / 25) * 60);
+    setEta(etaMinutes > 0 ? `${etaMinutes} min` : '< 1 min');
+    
     return;
   }
 
@@ -402,14 +530,13 @@ useEffect(() => {
     currentStep.endLocation.lat,
     currentStep.endLocation.lng
   );
-
   console.log(`📍 Distance to step end: ${distanceToStepEnd.toFixed(0)}m`);
 
   // Format next action distance
   const nextDistanceFeet = Math.round(distanceToStepEnd * 3.28084);
   const nextDistanceText = nextDistanceFeet > 500
-  ? `${(distanceToStepEnd / 1609.34).toFixed(1)} mi`
-  : `${nextDistanceFeet} ft`;
+    ? `${(distanceToStepEnd / 1609.34).toFixed(1)} mi`
+    : `${nextDistanceFeet} ft`;
   setNextActionDistance(nextDistanceText);
 
   // Estimate next action time (assuming 25 mph average)
@@ -442,8 +569,8 @@ useEffect(() => {
   // Format total distance
   const totalFeet = Math.round(totalRemainingMeters * 3.28084);
   const totalDistanceText = totalFeet > 500
-  ? `${(totalRemainingMeters / 1609.34).toFixed(1)} mi`
-  : `${totalFeet} ft`;
+    ? `${(totalRemainingMeters / 1609.34).toFixed(1)} mi`
+    : `${totalFeet} ft`;
   setTotalDistance(totalDistanceText);
 
   // Format total ETA
@@ -451,6 +578,398 @@ useEffect(() => {
     setEta(`${Math.round(totalRemainingSeconds)} sec`);
   } else {
     setEta(`${Math.round(totalRemainingSeconds / 60)} min`);
+  }
+};
+
+// Helper: Calculate perpendicular distance from point to line segment
+const distanceToSegment = (
+  point: { latitude: number; longitude: number },
+  segStart: { latitude: number; longitude: number },
+  segEnd: { latitude: number; longitude: number }
+): number => {
+  const dx = segEnd.longitude - segStart.longitude;
+  const dy = segEnd.latitude - segStart.latitude;
+  
+  if (dx === 0 && dy === 0) {
+    return haversineDistance(point.latitude, point.longitude, segStart.latitude, segStart.longitude);
+  }
+  
+  const t = Math.max(0, Math.min(1, 
+    ((point.longitude - segStart.longitude) * dx + (point.latitude - segStart.latitude) * dy) / 
+    (dx * dx + dy * dy)
+  ));
+  
+  const closestLat = segStart.latitude + t * dy;
+  const closestLng = segStart.longitude + t * dx;
+  
+  return haversineDistance(point.latitude, point.longitude, closestLat, closestLng);
+};
+
+// ==================== POLYLINE DISTANCE HELPERS ====================
+// Calculate total distance along polyline from current location to end
+const distanceAlongPolylineToEnd = (
+  currentLocation: { latitude: number; longitude: number },
+  polyline: Coordinate[]
+): number => {
+  if (polyline.length < 2) return 0;
+
+  let closestIndex = 0;
+  let closestDistance = Infinity;
+  let closestT = 0;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const segStart = polyline[i];
+    const segEnd = polyline[i + 1];
+    
+    const dx = segEnd.longitude - segStart.longitude;
+    const dy = segEnd.latitude - segStart.latitude;
+    
+    let t = 0;
+    if (dx !== 0 || dy !== 0) {
+      t = Math.max(0, Math.min(1,
+        ((currentLocation.longitude - segStart.longitude) * dx + 
+         (currentLocation.latitude - segStart.latitude) * dy) /
+        (dx * dx + dy * dy)
+      ));
+    }
+    
+    const projLat = segStart.latitude + t * dy;
+    const projLng = segStart.longitude + t * dx;
+    
+    const dist = haversineDistance(
+      currentLocation.latitude,
+      currentLocation.longitude,
+      projLat,
+      projLng
+    );
+    
+    if (dist < closestDistance) {
+      closestDistance = dist;
+      closestIndex = i;
+      closestT = t;
+    }
+  }
+
+  let totalDistance = 0;
+
+  // Distance from projected point to end of current segment
+  const segStart = polyline[closestIndex];
+  const segEnd = polyline[closestIndex + 1];
+  const projectedLat = segStart.latitude + closestT * (segEnd.latitude - segStart.latitude);
+  const projectedLng = segStart.longitude + closestT * (segEnd.longitude - segStart.longitude);
+  
+  totalDistance += haversineDistance(projectedLat, projectedLng, segEnd.latitude, segEnd.longitude);
+
+  // Sum remaining segments to end
+  for (let i = closestIndex + 1; i < polyline.length - 1; i++) {
+    totalDistance += haversineDistance(
+      polyline[i].latitude,
+      polyline[i].longitude,
+      polyline[i + 1].latitude,
+      polyline[i + 1].longitude
+    );
+  }
+
+  return totalDistance;
+};
+
+// Calculate distance along polyline from current location to a target point
+const distanceAlongPolylineToTarget = (
+  currentLocation: { latitude: number; longitude: number },
+  targetLocation: { lat: number; lng: number },
+  polyline: Coordinate[]
+): number => {
+  if (polyline.length < 2) return 0;
+
+  // Find driver's position on polyline
+  let driverIndex = 0;
+  let driverDistance = Infinity;
+  let driverT = 0;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const segStart = polyline[i];
+    const segEnd = polyline[i + 1];
+    
+    const dx = segEnd.longitude - segStart.longitude;
+    const dy = segEnd.latitude - segStart.latitude;
+    
+    let t = 0;
+    if (dx !== 0 || dy !== 0) {
+      t = Math.max(0, Math.min(1,
+        ((currentLocation.longitude - segStart.longitude) * dx + 
+         (currentLocation.latitude - segStart.latitude) * dy) /
+        (dx * dx + dy * dy)
+      ));
+    }
+    
+    const projLat = segStart.latitude + t * dy;
+    const projLng = segStart.longitude + t * dx;
+    
+    const dist = haversineDistance(currentLocation.latitude, currentLocation.longitude, projLat, projLng);
+    
+    if (dist < driverDistance) {
+      driverDistance = dist;
+      driverIndex = i;
+      driverT = t;
+    }
+  }
+
+  // Find target's closest point on polyline
+  let targetIndex = 0;
+  let targetDistance = Infinity;
+  let targetT = 0;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const segStart = polyline[i];
+    const segEnd = polyline[i + 1];
+    
+    const dx = segEnd.longitude - segStart.longitude;
+    const dy = segEnd.latitude - segStart.latitude;
+    
+    let t = 0;
+    if (dx !== 0 || dy !== 0) {
+      t = Math.max(0, Math.min(1,
+        ((targetLocation.lng - segStart.longitude) * dx + 
+         (targetLocation.lat - segStart.latitude) * dy) /
+        (dx * dx + dy * dy)
+      ));
+    }
+    
+    const projLat = segStart.latitude + t * dy;
+    const projLng = segStart.longitude + t * dx;
+    
+    const dist = haversineDistance(targetLocation.lat, targetLocation.lng, projLat, projLng);
+    
+    if (dist < targetDistance) {
+      targetDistance = dist;
+      targetIndex = i;
+      targetT = t;
+    }
+  }
+
+  // If target is behind driver, return 0
+  if (targetIndex < driverIndex || (targetIndex === driverIndex && targetT <= driverT)) {
+    return 0;
+  }
+
+  let totalDistance = 0;
+
+  if (driverIndex === targetIndex) {
+    // Same segment - calculate partial distance
+    const segStart = polyline[driverIndex];
+    const segEnd = polyline[driverIndex + 1];
+    const segLength = haversineDistance(segStart.latitude, segStart.longitude, segEnd.latitude, segEnd.longitude);
+    totalDistance = segLength * (targetT - driverT);
+  } else {
+    // Driver's remaining distance in current segment
+    const driverSegStart = polyline[driverIndex];
+    const driverSegEnd = polyline[driverIndex + 1];
+    const driverSegLength = haversineDistance(
+      driverSegStart.latitude, driverSegStart.longitude,
+      driverSegEnd.latitude, driverSegEnd.longitude
+    );
+    totalDistance += driverSegLength * (1 - driverT);
+
+    // Full segments between
+    for (let i = driverIndex + 1; i < targetIndex; i++) {
+      totalDistance += haversineDistance(
+        polyline[i].latitude, polyline[i].longitude,
+        polyline[i + 1].latitude, polyline[i + 1].longitude
+      );
+    }
+
+    // Target's portion of its segment
+    const targetSegStart = polyline[targetIndex];
+    const targetSegEnd = polyline[targetIndex + 1];
+    const targetSegLength = haversineDistance(
+      targetSegStart.latitude, targetSegStart.longitude,
+      targetSegEnd.latitude, targetSegEnd.longitude
+    );
+    totalDistance += targetSegLength * targetT;
+  }
+
+  return totalDistance;
+};
+
+// ==================== REROUTING LOGIC ====================
+const checkOffRoute = (location: Location): boolean => {
+  // Don't check if no route coordinates
+  if (routeCoordinates.length < 2) return false;
+
+  // Find minimum distance to any point on route
+  let minDistance = Infinity;
+  for (const coord of routeCoordinates) {
+    const dist = haversineDistance(
+      location.latitude,
+      location.longitude,
+      coord.latitude,
+      coord.longitude
+    );
+    if (dist < minDistance) minDistance = dist;
+  }
+
+  // If more than 100 meters off route, trigger reroute
+  const isOffRoute = minDistance > 30;
+  if (isOffRoute) {
+    console.log(`⚠️ Driver is ${minDistance.toFixed(0)}m off route`);
+  }
+  return isOffRoute;
+};
+
+// ==================== REAL-TIME ROUTE REFRESH ====================
+const refreshRouteFromGoogle = async (location: Location) => {
+  // Don't refresh if not in active navigation
+  if (ride.status !== 'en_route_to_pickup' && ride.status !== 'in_trip') return;
+  
+  try {
+    const token = await apiService.getToken();
+    if (!token) return;
+
+    // Determine target based on ride status
+    const target = ride.status === 'en_route_to_pickup'
+      ? { lat: ride.pickup.lat, lng: ride.pickup.lng }
+      : { lat: ride.destination.lat, lng: ride.destination.lng };
+
+    const response = await fetch(`${API_BASE_URL}/api/routes/calculate`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        driverLocation: {
+          lat: location.latitude,
+          lng: location.longitude,
+        },
+        pickup: { lat: ride.pickup.lat, lng: ride.pickup.lng },
+        destination: { lat: ride.destination.lat, lng: ride.destination.lng },
+        refreshRoute: true,
+        rideStatus: ride.status,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      const routeData = ride.status === 'en_route_to_pickup'
+        ? data.toPickup
+        : data.toDestination;
+
+      // Update polyline
+      if (routeData?.polyline) {
+        const coords = decodePolyline(routeData.polyline);
+        setRouteCoordinates(coords);
+      }
+
+      // Update navigation steps
+      if (routeData?.steps && routeData.steps.length > 0) {
+        const steps = routeData.steps.map((step: any) => ({
+          instruction: step.instruction || '',
+          distance: step.distance?.text || '',
+          duration: step.duration?.text || '',
+          maneuver: step.maneuver || '',
+          endLocation: step.end_location ? {
+            lat: step.end_location.lat,
+            lng: step.end_location.lng,
+          } : undefined,
+        }));
+        setNavigationSteps(steps);
+        navigationStepsRef.current = steps;
+        
+        // Update ETA and distance from Google's response
+        if (routeData.duration?.text) {
+          setEta(routeData.duration.text);
+        }
+        if (routeData.distance?.text) {
+          setTotalDistance(routeData.distance.text);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Route refresh failed:', error);
+  }
+};
+
+
+
+
+const triggerReroute = async (location: Location) => {
+  // Prevent multiple reroutes within 2 seconds
+  const now = Date.now();
+  if (now - lastRerouteTimeRef.current < 2000) return;
+  if (isReroutingRef.current) return;
+  
+  console.log('🔄 Rerouting from current position...');
+  isReroutingRef.current = true;
+  lastRerouteTimeRef.current = now;
+  
+  try {
+    // Determine target based on ride status
+    const target = ride.status === 'en_route_to_pickup' 
+      ? { lat: ride.pickup.lat, lng: ride.pickup.lng }
+      : { lat: ride.destination.lat, lng: ride.destination.lng };
+    
+    const token = await apiService.getToken();
+    if (!token) {
+      console.error('No auth token for reroute');
+      return;
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/api/routes/calculate`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        driverLocation: {
+          lat: location.latitude,
+          lng: location.longitude,
+           heading: location.heading,
+        },
+        pickup: target,
+        destination: ride.status === 'en_route_to_pickup' 
+          ? { lat: ride.destination.lat, lng: ride.destination.lng }
+          : target,
+        refreshRoute: true,
+      }),
+    });
+    
+    const data = await response.json();
+    
+    if (data.toPickup?.polyline || data.toDestination?.polyline) {
+      const routeData = ride.status === 'en_route_to_pickup' 
+        ? data.toPickup 
+        : data.toDestination;
+      
+      if (routeData?.polyline) {
+        const coords = decodePolyline(routeData.polyline);
+        setRouteCoordinates(coords);
+      }
+      
+      if (routeData?.steps) {
+        const steps = routeData.steps.map((step: any) => ({
+          instruction: step.instruction || '',
+          distance: step.distance?.text || '',
+          duration: step.duration?.text || '',
+          maneuver: step.maneuver || '',
+          endLocation: step.end_location ? {
+            lat: step.end_location.lat,
+            lng: step.end_location.lng,
+          } : undefined,
+        }));
+        setNavigationSteps(steps);
+        navigationStepsRef.current = steps;
+        currentStepIndexRef.current = 0;
+        setCurrentStepIndex(0);
+      }
+      
+      console.log('✅ Reroute complete');
+    }
+  } catch (error) {
+    console.error('❌ Reroute failed:', error);
+  } finally {
+    isReroutingRef.current = false;
   }
 };
 
@@ -646,10 +1165,10 @@ if (routeData?.toDestination) {
     console.log('✅ Trip completed, returning home');
 
     navigation.reset({
-      index: 0,
-      routes: [{ name: 'Home' }],
-    });
-  };
+    index: 0,
+    routes: [{ name: 'Home', params: { stayOnline: true } }],
+  });
+   };
 
   // ==================== ACTION HANDLERS ====================
 
@@ -710,7 +1229,7 @@ if (routeData?.toDestination) {
 
               navigation.reset({
                 index: 0,
-                routes: [{ name: 'Home' }],
+                routes: [{ name: 'Home', params: { stayOnline: true } }],
               });
             } catch (error) {
               console.error('Cancel error:', error);
@@ -788,38 +1307,44 @@ if (routeData?.toDestination) {
       {/* Bottom panel */}
 <View style={styles.bottomPanel}>
   {/* Status row - show during en_route_to_pickup */}
-  {ride.status === 'en_route_to_pickup' && (
+    {ride.status === 'en_route_to_pickup' && (
     <>
-      <StatusRow
-        riderName={ride.rider.name}
-        address={ride.pickup.address}
-        tripStatus={ride.status}
-        distance={totalDistance}
-        eta={eta}
-      />
-      <View style={styles.riderInfoRow}>
-        <View style={styles.riderAvatar}>
-          <Text style={styles.riderInitials}>
-            {ride.rider.name.split(' ').map(n => n[0]).join('')}
-          </Text>
-        </View>
-        <View style={styles.riderDetails}>
-          <Text style={styles.riderName}>{ride.rider.name}</Text>
-          <Text style={styles.riderRating}>{'★'.repeat(Math.round(ride.rider.rating || 4.5))} {ride.rider.rating || 4.5}</Text>
-        </View>
-        <TouchableOpacity style={styles.actionButton} onPress={handleMessageRider}>
-          <Text style={styles.actionButtonIcon}>💬</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={handleCallRider}>
-          <Text style={styles.actionButtonIcon}>📞</Text>
-        </TouchableOpacity>
-      </View>
-      <TouchableOpacity
-        style={styles.cancelButton}
-        onPress={handleCancelRide}
-      >
-        <Text style={styles.cancelButtonText}>Cancel Ride</Text>
+      <TouchableOpacity onPress={() => setBottomCardExpanded(!bottomCardExpanded)}>
+        <StatusRow
+          riderName={ride.rider.name}
+          address={ride.pickup.address}
+          tripStatus={ride.status}
+          distance={totalDistance}
+          eta={eta}
+        />
       </TouchableOpacity>
+      {bottomCardExpanded && (
+        <>
+          <View style={styles.riderInfoRow}>
+            <View style={styles.riderAvatar}>
+              <Text style={styles.riderInitials}>
+                {ride.rider.name.split(' ').map(n => n[0]).join('')}
+              </Text>
+            </View>
+            <View style={styles.riderDetails}>
+              <Text style={styles.riderName}>{ride.rider.name}</Text>
+              <Text style={styles.riderRating}>{'★'.repeat(Math.round(ride.rider.rating || 4.5))} {ride.rider.rating || 4.5}</Text>
+            </View>
+            <TouchableOpacity style={styles.actionButton} onPress={handleMessageRider}>
+              <Text style={styles.actionButtonIcon}>💬</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionButton} onPress={handleCallRider}>
+              <Text style={styles.actionButtonIcon}>📞</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={handleCancelRide}
+          >
+            <Text style={styles.cancelButtonText}>Cancel Ride</Text>
+          </TouchableOpacity>
+        </>
+      )}
     </>
   )}
 
