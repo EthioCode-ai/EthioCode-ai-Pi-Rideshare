@@ -211,14 +211,19 @@ const speedLimiter = slowDown({
 async function getAirportsFromDB() {
   try {
     const result = await pool.query(
-      'SELECT airport_code, airport_name, latitude, longitude, geofence_radius_km FROM airport_zones WHERE is_active = true'
+      'SELECT airport_code, airport_name, latitude, longitude, geofence_radius_km, waiting_lot_lat, waiting_lot_lng, waiting_lot_name FROM airport_zones WHERE is_active = true'
     );
     return result.rows.map(row => ({
       name: `${row.airport_code} - ${row.airport_name}`,
       code: row.airport_code,
       lat: parseFloat(row.latitude),
       lng: parseFloat(row.longitude),
-      radius: parseFloat(row.geofence_radius_km)
+      radius: parseFloat(row.geofence_radius_km),
+      waitingLot: row.waiting_lot_lat && row.waiting_lot_lng ? {
+        lat: parseFloat(row.waiting_lot_lat),
+        lng: parseFloat(row.waiting_lot_lng),
+        name: row.waiting_lot_name || `${row.airport_code} Waiting Lot`
+      } : null
     }));
   } catch (error) {
     console.error('Error fetching airports from DB:', error);
@@ -9105,6 +9110,53 @@ app.get('/api/airports/queues', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// Get airport rideshare lots for map display
+app.get('/api/airports/rideshare-lots', async (req, res) => {
+  try {
+    const { minLat, maxLat, minLng, maxLng } = req.query;
+    
+    const airports = await getAirportsFromDB();
+    
+    // Filter airports with waiting lots
+    let airportsWithLots = airports.filter(airport => airport.waitingLot);
+    
+    // Filter by map bounds if provided
+    if (minLat && maxLat && minLng && maxLng) {
+      airportsWithLots = airportsWithLots.filter(airport => {
+        const lot = airport.waitingLot;
+        return lot.lat >= parseFloat(minLat) && 
+               lot.lat <= parseFloat(maxLat) && 
+               lot.lng >= parseFloat(minLng) && 
+               lot.lng <= parseFloat(maxLng);
+      });
+    }
+    
+    const lots = airportsWithLots.map(airport => {
+      const queue = airportDriverQueues.get(airport.name) || [];
+      return {
+        code: airport.code,
+        name: airport.waitingLot.name,
+        lat: airport.waitingLot.lat,
+        lng: airport.waitingLot.lng,
+        queueSize: queue.length,
+        queueByVehicleType: {
+          economy: 0,
+          standard: 0,
+          xl: 0,
+          premium: 0
+        }
+      };
+    });
+    
+    res.json({ success: true, lots });
+  } catch (error) {
+    console.error('Get rideshare lots error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+
 
 app.get('/api/airports/driver-status/:driverId', authenticateToken, (req, res) => {
   try {

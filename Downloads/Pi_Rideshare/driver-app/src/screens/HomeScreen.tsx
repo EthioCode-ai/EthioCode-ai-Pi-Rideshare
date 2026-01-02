@@ -11,6 +11,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { useKeepAwake, activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import driverService from '../services/driver.service';
@@ -39,6 +40,13 @@ type RideState = 'waiting' | 'pickingUp' | 'droppingOff';
 /**
  * Map Styles: Dynamic based on driver state
  */
+
+const CANNED_MESSAGES = [
+  "I have arrived.",
+  "On my way!",
+  "Stuck in traffic. I'll be there shortly.",
+];
+
 const IDLE_MAP_STYLE = [
   { "elementType": "geometry", "stylers": [{ "color": "#ebebeb" }] },
   { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9d6df" }] },
@@ -60,6 +68,7 @@ const HomeScreen: React.FC = () => {
   const locationRef = useRef<any>(null);
   const headingRef = useRef<number>(0);
   const [isOnline, setIsOnline] = useState(false);
+  const isOnlineRef = useRef(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [rideRequest, setRideRequest] = useState<RideRequestData | null>(null);
   const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -73,7 +82,26 @@ const HomeScreen: React.FC = () => {
   const [surgeZones, setSurgeZones] = useState<any[]>([]);
   const [bannerTextIndex, setBannerTextIndex] = useState(0);
   const navigation = useNavigation<StackNavigationProp<MainStackParamList>>();
+  const [showChatOptions, setShowChatOptions] = useState(false);
+  const [currentRideInfo, setCurrentRideInfo] = useState<{riderId: string; riderName: string; rideId: string} | null>(null);
   const route = useRoute<RouteProp<MainStackParamList, 'Home'>>();
+  const [airportLots, setAirportLots] = useState<Array<{
+    code: string;
+    name: string;
+    lat: number;
+    lng: number;
+    queueSize: number;
+    queueByVehicleType: { economy: number; standard: number; xl: number; premium: number };
+  }>>([]);
+  const [selectedLot, setSelectedLot] = useState<string | null>(null);
+    
+  const [airportQueue, setAirportQueue] = useState<{
+  inQueue: boolean;
+  airportName: string;
+  position: number;
+  totalInQueue: number;
+  estimatedWait: number;
+} | null>(null);
   const [completedTripModal, setCompletedTripModal] = useState<{
   visible: boolean;
   fare: number;
@@ -152,6 +180,29 @@ useEffect(() => {
   }
 }, [route.params?.completedTrip]);
 
+// Handle stayOnline param (from cancellation)
+useEffect(() => {
+  if (route.params?.stayOnline) {
+    setIsOnline(true);
+  }
+}, [route.params?.stayOnline]);
+
+// Keep screen awake while online
+
+useEffect(() => {
+  if (isOnline) {
+    activateKeepAwakeAsync();
+    console.log('🔆 Screen keep-awake activated');
+  } else {
+    deactivateKeepAwake();
+    console.log('🔅 Screen keep-awake deactivated');
+  }
+  
+  return () => {
+    deactivateKeepAwake();
+  };
+}, [isOnline]);
+
   useEffect(() => {
     // Animate header expansion/collapse
     Animated.timing(headerHeight, {
@@ -220,13 +271,13 @@ useEffect(() => {
         riderRating: 4.8,
         pickup: {
           address: request.pickup?.address || 'Pickup location',
-          lat: request.pickup?.latitude,
-          lng: request.pickup?.longitude,
+          lat: request.pickup?.lat,      // ✅ Changed from latitude
+          lng: request.pickup?.lng,      // ✅ Changed from longitude
         },
         destination: {
           address: request.destination?.address || 'Destination',
-          lat: request.destination?.latitude,
-          lng: request.destination?.longitude,
+          lat: request.destination?.lat,  // ✅ Changed from latitude
+          lng: request.destination?.lng,  // ✅ Changed from longitude
         },
         estimatedFare: request.estimatedFare || 0,
         estimatedDistance: request.estimatedDistance,
@@ -245,6 +296,11 @@ useEffect(() => {
     }
   };
 }, [socketConnected, user?.id]);
+
+// Keep isOnlineRef in sync
+useEffect(() => {
+  isOnlineRef.current = isOnline;
+}, [isOnline]);
 
 // Fetch surge zones for heatmap overlay
 const fetchSurgeZones = async () => {
@@ -270,6 +326,22 @@ const fetchSurgeZones = async () => {
   }
 };
 
+// Fetch airport lots on mount
+useEffect(() => {
+  fetchAirportLots();
+}, []);
+
+// Poll airport queue when online
+useEffect(() => {
+  if (isOnline && user?.id) {
+    checkAirportQueue();
+    const interval = setInterval(checkAirportQueue, 30000);
+    return () => clearInterval(interval);
+  } else {
+    setAirportQueue(null);
+  }
+}, [isOnline, user?.id]);
+
 // Listen to Socket.IO surge updates for real-time sync
 useEffect(() => {
   if (socketConnected) {
@@ -291,21 +363,29 @@ useEffect(() => {
   // Fetch performance data from backend
   const fetchPerformanceData = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/driver/performance/today', {
+      const token = await AsyncStorage.getItem(StorageKeys.AUTH_TOKEN);
+      const userData = await AsyncStorage.getItem(StorageKeys.USER_DATA);
+      if (!token || !userData) {
+        console.log('No auth token or user data for performance fetch');
+        return;
+      }
+      const user = JSON.parse(userData);
+      const response = await fetch(`${API_BASE_URL}/api/driver/earnings/${user.id}`, {
         headers: {
-          'Authorization': 'Bearer YOUR_TOKEN_HERE',
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
       });
-      
       if (response.ok) {
         const data = await response.json();
         setPerformanceData({
-          todayEarnings: data.todayEarnings || 0,
+          todayEarnings: data.today || 0,
           trips: data.trips || 0,
-          onlineHours: data.onlineHours || 0,
+          onlineHours: data.hours || 0,
           miles: data.miles || 0,
           lastRide: data.lastRide || 0,
         });
+        console.log('✅ Performance data loaded:', data);
       }
     } catch (error) {
       console.log('Could not fetch performance data:', error);
@@ -371,16 +451,16 @@ useEffect(() => {
           }
            
           // Rotate map camera when online and moving
-          if (isOnline && newLocation.coords.heading !== null && mapRef.current) {
-            mapRef.current.animateCamera({
-              center: {
-                latitude: newLoc.latitude,
-                longitude: newLoc.longitude,
-              },
-              heading: newLocation.coords.heading,
-              pitch: 60,
-              //zoom: 19,
-            }, { duration: 500 });
+          if (isOnlineRef.current && mapRef.current) {
+             mapRef.current.animateCamera({
+             center: {
+            latitude: newLoc.latitude,
+            longitude: newLoc.longitude,
+          },
+            heading: newLocation.coords.heading || heading || 0,
+            pitch: 60,
+            zoom: 18,
+         }, { duration: 500 });
           }
         }
       );
@@ -446,7 +526,7 @@ const toggleOnlineStatus = async () => {
           },
           heading: heading,
           pitch: 60,
-          zoom: 16,
+          zoom: 18,
         }, { duration: 1000 });
       }
       
@@ -585,19 +665,93 @@ const handleDeclineRide = (rideId: string) => {
     
     switch(action) {
       case 'documents':
-        Alert.alert('Upload Documents', 'Document upload feature coming soon!');
+        navigation.navigate('Documents');
+        break;
+      case 'earnings':
+        navigation.navigate('Earnings');
         break;
       case 'performance':
         Alert.alert('Performance Summary', 'Detailed performance view coming soon!');
         break;
       case 'settings':
-        Alert.alert('Settings', 'Settings screen coming soon!');
+        navigation.navigate('Settings');
         break;
       case 'power':
         toggleOnlineStatus();
         break;
     }
   };
+
+// Fetch airport rideshare lots for map display
+const fetchAirportLots = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/airports/rideshare-lots`);
+    const data = await response.json();
+    
+    if (data.success) {
+      setAirportLots(data.lots);
+    }
+  } catch (error) {
+    console.log('Fetch airport lots error:', error);
+  }
+};
+
+// Check airport queue status
+const checkAirportQueue = async () => {
+  if (!user?.id || !location) return;
+  
+  try {
+    const token = await AsyncStorage.getItem(StorageKeys.AUTH_TOKEN);
+    if (!token) return;
+    
+    const response = await fetch(`${API_BASE_URL}/api/airports/driver-status/${user.id}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.inQueue) {
+        setAirportQueue({
+          inQueue: true,
+          airportName: data.airportName || 'Airport',
+          position: data.position || 0,
+          totalInQueue: data.totalInQueue || 0,
+          estimatedWait: data.estimatedWait || 0,
+        });
+      } else {
+        setAirportQueue(null);
+      }
+    }
+  } catch (error) {
+    console.log('Airport queue check error:', error);
+  }
+};
+
+const sendCannedMessage = (message: string) => {
+  if (currentRideInfo) {
+    socketService.sendChatMessage({
+      rideId: currentRideInfo.rideId,
+      riderId: currentRideInfo.riderId,
+      driverId: user?.id || '',
+      message: message,
+      sender: 'driver',
+    });
+    Alert.alert('Message Sent', message);
+  } else {
+    Alert.alert('No Active Ride', 'You need an active ride to send messages.');
+  }
+  setShowChatOptions(false);
+};
+
+const openChat = () => {
+  setShowChatOptions(false);
+  if (currentRideInfo) {
+    navigation.navigate('Chat', currentRideInfo);
+  } else {
+    Alert.alert('No Active Ride', 'You need an active ride to open chat.');
+  }
+};
+
 
   const formatCurrency = (amount: number) => {
     return `$${amount.toFixed(2)}`;
@@ -695,8 +849,56 @@ const handleDeclineRide = (rideId: string) => {
     }}
     resizeMode="contain"
   />
-          </Marker>
+        </Marker>
+          
+          {/* Airport Rideshare Lot Markers */}
+          {airportLots.map((lot) => (
+            <Marker
+              key={lot.code}
+              coordinate={{ latitude: lot.lat, longitude: lot.lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              onPress={() => setSelectedLot(selectedLot === lot.code ? null : lot.code)}
+            >
+              <View style={styles.airportLotMarker}>
+                <Text style={styles.airportLotText}>P</Text>
+                <Text style={styles.airportLotName}>{lot.name}</Text>
+              </View>
+            </Marker>
+          ))}
         </MapView>
+        
+        {/* Airport Lot Queue Modal */}
+        {selectedLot && (
+          <View style={styles.lotQueueModal}>
+            <View style={styles.lotQueueHeader}>
+              <Text style={styles.lotQueueTitle}>
+                {airportLots.find(l => l.code === selectedLot)?.name}
+              </Text>
+              <TouchableOpacity onPress={() => setSelectedLot(null)}>
+                <Text style={styles.lotQueueClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.lotQueueSubtitle}>Queue by Vehicle Type</Text>
+            <View style={styles.lotQueueGrid}>
+              <View style={styles.lotQueueItem}>
+                <Text style={styles.lotQueueType}>Economy</Text>
+                <Text style={styles.lotQueueCount}>-</Text>
+              </View>
+              <View style={styles.lotQueueItem}>
+                <Text style={styles.lotQueueType}>Standard</Text>
+                <Text style={styles.lotQueueCount}>-</Text>
+              </View>
+              <View style={styles.lotQueueItem}>
+                <Text style={styles.lotQueueType}>XL</Text>
+                <Text style={styles.lotQueueCount}>-</Text>
+              </View>
+              <View style={styles.lotQueueItem}>
+                <Text style={styles.lotQueueType}>Premium</Text>
+                <Text style={styles.lotQueueCount}>-</Text>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Expandable Header Bar */}
         <Animated.View style={[styles.header, { top: headerHeight }]}>
@@ -707,8 +909,13 @@ const handleDeclineRide = (rideId: string) => {
             >
               <Text style={styles.headerIcon}>📄</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity 
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => handleHeaderAction('earnings')}
+            >
+              <Text style={styles.headerIcon}>💰</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.headerButton}
               onPress={() => handleHeaderAction('performance')}
             >
@@ -812,6 +1019,32 @@ const handleDeclineRide = (rideId: string) => {
           </View>
         )}
 
+        {/* Airport Queue Card */}
+        {airportQueue && isOnline && (
+          <View style={styles.airportQueueCard}>
+            <View style={styles.airportQueueHeader}>
+              <Text style={styles.airportQueueIcon}>✈️</Text>
+              <Text style={styles.airportQueueTitle}>{airportQueue.airportName}</Text>
+            </View>
+            <View style={styles.airportQueueStats}>
+              <View style={styles.airportQueueStat}>
+                <Text style={styles.airportQueueStatValue}>#{airportQueue.position}</Text>
+                <Text style={styles.airportQueueStatLabel}>Position</Text>
+              </View>
+              <View style={styles.airportQueueDivider} />
+              <View style={styles.airportQueueStat}>
+                <Text style={styles.airportQueueStatValue}>{airportQueue.totalInQueue}</Text>
+                <Text style={styles.airportQueueStatLabel}>In Queue</Text>
+              </View>
+              <View style={styles.airportQueueDivider} />
+              <View style={styles.airportQueueStat}>
+                <Text style={styles.airportQueueStatValue}>~{airportQueue.estimatedWait}m</Text>
+                <Text style={styles.airportQueueStatLabel}>Wait</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Floating Action Buttons */}
         <View style={styles.floatingButtons}>
           <TouchableOpacity style={styles.floatingButton}>
@@ -820,10 +1053,13 @@ const handleDeclineRide = (rideId: string) => {
           <TouchableOpacity style={styles.floatingButton} onPress={centerOnUserLocation}>
             <Text style={styles.floatingButtonText}>🧭</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.floatingButton, styles.floatingButtonPrimary]}>
-            <Text style={styles.floatingButtonText}>💬</Text>
-          </TouchableOpacity>
-        {/* TEST BUTTON - Remove before production */}
+          <TouchableOpacity 
+           style={[styles.floatingButton, styles.floatingButtonPrimary]}
+          onPress={() => setShowChatOptions(!showChatOptions)}
+          >
+         <Text style={styles.floatingButtonText}>💬</Text>
+       </TouchableOpacity>
+       {/* TEST BUTTON - Remove before production */}
   {isOnline && (
     <TouchableOpacity 
       style={[styles.floatingButton, { backgroundColor: '#F59E0B' }]}
@@ -853,7 +1089,28 @@ const handleDeclineRide = (rideId: string) => {
       <Text style={styles.floatingButtonText}>🧪</Text>
     </TouchableOpacity>
   )}  
-        </View>
+        
+</View>
+  {/* Chat Quick Options */}
+        {showChatOptions && (
+          <View style={styles.chatOptionsContainer}>
+            {CANNED_MESSAGES.map((msg, index) => (
+              <TouchableOpacity
+                key={index}
+                style={styles.chatOption}
+                onPress={() => sendCannedMessage(msg)}
+              >
+                <Text style={styles.chatOptionText}>{msg}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.chatOption, styles.chatOptionPrimary]}
+              onPress={openChat}
+            >
+              <Text style={styles.chatOptionTextPrimary}>Open Chat</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Bottom Banner - Dynamic based on driver status */}
         <View style={styles.bottomControls}>
@@ -1302,6 +1559,181 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
     letterSpacing: 0.5,
+  },
+  // Chat Quick Options
+  chatOptionsContainer: {
+    position: 'absolute',
+    right: 80,
+    bottom: 260,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    minWidth: 250,
+  },
+  chatOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  chatOptionText: {
+    fontSize: 14,
+    color: '#1F2937',
+  },
+  chatOptionPrimary: {
+    borderBottomWidth: 0,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  chatOptionTextPrimary: {
+    fontSize: 14,
+    color: '#6B46C1',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+ // Airport Queue Card
+  airportQueueCard: {
+    position: 'absolute',
+    top: 140,
+    left: 16,
+    right: 16,
+    backgroundColor: '#1E3A5F',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 850,
+  },
+  airportQueueHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  airportQueueIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  airportQueueTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFF',
+    flex: 1,
+  },
+  airportQueueStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
+  airportQueueStat: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  airportQueueStatValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#4ADE80',
+  },
+  airportQueueStatLabel: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  airportQueueDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: '#334155',
+  },
+  // Airport Lot Marker Styles
+  airportLotMarker: {
+    backgroundColor: '#6B46C1',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  airportLotText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 12,
+    marginRight: 4,
+  },
+  airportLotName: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  lotQueueModal: {
+    position: 'absolute',
+    bottom: 200,
+    left: 20,
+    right: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  lotQueueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  lotQueueTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  lotQueueClose: {
+    fontSize: 18,
+    color: '#6B7280',
+    padding: 4,
+  },
+  lotQueueSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  lotQueueGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  lotQueueItem: {
+    width: '48%',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  lotQueueType: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  lotQueueCount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1F2937',
   },
 });
 

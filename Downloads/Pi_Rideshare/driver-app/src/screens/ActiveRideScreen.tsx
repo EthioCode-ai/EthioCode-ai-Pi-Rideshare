@@ -84,6 +84,12 @@ const ActiveRideScreen: React.FC = () => {
   const [user, setUser] = useState<any>(null);
   const [driverLocation, setDriverLocation] = useState<Location | null>(null);
   const [heading, setHeading] = useState(0);
+
+  // Movement prompt state
+  const [showMovementPrompt, setShowMovementPrompt] = useState(false);
+  const acceptanceLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const movementCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const promptDismissTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Route state
   const [routeCoordinates, setRouteCoordinates] = useState<Coordinate[]>([]);
@@ -139,6 +145,46 @@ useEffect(() => {
   useEffect(() => {
     rideRef.current = ride;
   }, [ride]);
+
+  // 90-second movement check for en_route_to_pickup
+  useEffect(() => {
+    if (ride.status === 'en_route_to_pickup' && driverLocation) {
+      // Capture initial location when ride is accepted
+      if (!acceptanceLocationRef.current) {
+        acceptanceLocationRef.current = {
+          latitude: driverLocation.latitude,
+          longitude: driverLocation.longitude,
+        };
+        console.log('📍 Captured acceptance location:', acceptanceLocationRef.current);
+        
+        // Start 90-second timer
+        movementCheckTimerRef.current = setTimeout(() => {
+          checkMovementTowardPickup();
+        }, 90000);
+      }
+    } else {
+      // Clear timers and reset when not en_route_to_pickup
+      if (movementCheckTimerRef.current) {
+        clearTimeout(movementCheckTimerRef.current);
+        movementCheckTimerRef.current = null;
+      }
+      if (promptDismissTimerRef.current) {
+        clearTimeout(promptDismissTimerRef.current);
+        promptDismissTimerRef.current = null;
+      }
+      acceptanceLocationRef.current = null;
+      setShowMovementPrompt(false);
+    }
+    
+    return () => {
+      if (movementCheckTimerRef.current) {
+        clearTimeout(movementCheckTimerRef.current);
+      }
+      if (promptDismissTimerRef.current) {
+        clearTimeout(promptDismissTimerRef.current);
+      }
+    };
+  }, [ride.status, driverLocation]);
 
   useEffect(() => {
     console.log('🚗 ActiveRideScreen mounted');
@@ -816,6 +862,42 @@ const checkOffRoute = (location: Location): boolean => {
   return isOffRoute;
 };
 
+// Check if driver has moved toward pickup within 90 seconds
+const checkMovementTowardPickup = () => {
+  if (!acceptanceLocationRef.current || !driverLocation || !ride.pickup) {
+    return;
+  }
+  
+  const initialDistanceToPickup = haversineDistance(
+    acceptanceLocationRef.current.latitude,
+    acceptanceLocationRef.current.longitude,
+    ride.pickup.lat,
+    ride.pickup.lng
+  );
+  
+  const currentDistanceToPickup = haversineDistance(
+    driverLocation.latitude,
+    driverLocation.longitude,
+    ride.pickup.lat,
+    ride.pickup.lng
+  );
+  
+  // Check if driver has moved at least 50 meters closer to pickup
+  const hasMovedTowardPickup = (initialDistanceToPickup - currentDistanceToPickup) > 50;
+  
+  console.log(`📍 Movement check - Initial: ${initialDistanceToPickup.toFixed(0)}m, Current: ${currentDistanceToPickup.toFixed(0)}m, Moved toward: ${hasMovedTowardPickup}`);
+  
+  if (!hasMovedTowardPickup) {
+    // Show prompt
+    setShowMovementPrompt(true);
+    
+    // Auto-dismiss after 10 seconds
+    promptDismissTimerRef.current = setTimeout(() => {
+      setShowMovementPrompt(false);
+    }, 10000);
+  }
+};
+
 // ==================== REAL-TIME ROUTE REFRESH ====================
 const refreshRouteFromGoogle = async (location: Location) => {
   // Don't refresh if not in active navigation
@@ -1272,8 +1354,19 @@ if (routeData?.toDestination) {
 
   // ==================== RENDER ====================
 
-  return (
+  
+    return (
     <View style={styles.container}>
+      {/* Movement Prompt */}
+      {showMovementPrompt && (
+        <View style={styles.movementPromptContainer}>
+          <View style={styles.movementPrompt}>
+            <Text style={styles.movementPromptText}>
+              Are you going to pickup your rider?
+            </Text>
+          </View>
+        </View>
+      )}
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
       {/* Map with route */}
@@ -1534,7 +1627,34 @@ const styles = StyleSheet.create({
   actionButtonIcon: {
     fontSize: 20,
   },
-
+  // Movement Prompt Styles
+  movementPromptContainer: {
+    position: 'absolute',
+    top: 100,
+    left: 20,
+    right: 20,
+    zIndex: 1000,
+    alignItems: 'center',
+  },
+  movementPrompt: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  movementPromptText: {
+    color: '#92400E',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
 });
+
 
 export default ActiveRideScreen;
