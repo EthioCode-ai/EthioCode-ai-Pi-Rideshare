@@ -7620,12 +7620,141 @@ io.on('connection', (socket) => {
 
     } catch (error) {
       console.error('Message send error:', error);
-    }
-  });
+      }
+    });
 
-  // Handle ride cancellation acknowledgment from driver
-  socket.on('ride-cancelled-ack', async (data) => {
-    const { rideId, driverId, timestamp } = data;
+    // ============================================
+    // RIDE CANCELLATION SOCKET HANDLERS
+    // ============================================
+    
+    // Handle ride cancellation from DRIVER
+    socket.on('driver-cancel-ride', async (data) => {
+      const { driverId, rideId, reason } = data;
+      console.log(`🚫 [CANCEL] Driver ${driverId} cancelling ride ${rideId}`);
+      
+      try {
+        // Fetch ride from database
+        const rideResult = await db.query('SELECT * FROM rides WHERE id = $1', [rideId]);
+        const ride = rideResult.rows[0];
+        
+        if (!ride) {
+          console.log(`🚫 [CANCEL] Ride ${rideId} not found`);
+          socket.emit('cancel-error', { rideId, error: 'Ride not found' });
+          return;
+        }
+        
+        if (['completed', 'cancelled'].includes(ride.status)) {
+          console.log(`🚫 [CANCEL] Ride ${rideId} already ${ride.status}`);
+          socket.emit('cancel-error', { rideId, error: `Ride already ${ride.status}` });
+          return;
+        }
+        
+        // Update ride status in database
+        await db.updateRideStatus(rideId, 'cancelled', {
+          cancelled_at: new Date(),
+          cancelled_by: 'driver',
+          cancellation_reason: reason || 'Driver cancelled'
+        });
+        
+        console.log(`✅ [CANCEL] Ride ${rideId} status updated to cancelled`);
+        
+        // Notify the RIDER that driver cancelled
+        const cancellationData = {
+          rideId,
+          reason: reason || 'Driver cancelled',
+          cancelledBy: 'driver',
+          timestamp: new Date().toISOString()
+        };
+        
+        io.to(`user-${ride.rider_id}`).emit('ride-cancelled', cancellationData);
+        console.log(`📡 [CANCEL] Emitted ride-cancelled to rider ${ride.rider_id}`);
+        
+        // Confirm cancellation to driver
+        socket.emit('cancel-confirmed', { rideId, status: 'cancelled' });
+        
+        // Reset driver availability
+        updateDriverAvailability(driverId, {
+          isAvailable: true,
+          currentRideId: null
+        });
+        console.log(`✅ [CANCEL] Driver ${driverId} availability reset`);
+        
+        // Clean up in-memory maps
+        activeRideRequests.delete(rideId);
+        cascadingRequests.delete(rideId);
+        
+      } catch (error) {
+        console.error(`❌ [CANCEL] Error cancelling ride ${rideId}:`, error);
+        socket.emit('cancel-error', { rideId, error: 'Failed to cancel ride' });
+      }
+    });
+    
+    // Handle ride cancellation from RIDER
+    socket.on('rider-cancel-ride', async (data) => {
+      const { riderId, rideId, reason } = data;
+      console.log(`🚫 [CANCEL] Rider ${riderId} cancelling ride ${rideId}`);
+      
+      try {
+        // Fetch ride from database
+        const rideResult = await db.query('SELECT * FROM rides WHERE id = $1', [rideId]);
+        const ride = rideResult.rows[0];
+        
+        if (!ride) {
+          console.log(`🚫 [CANCEL] Ride ${rideId} not found`);
+          socket.emit('cancel-error', { rideId, error: 'Ride not found' });
+          return;
+        }
+        
+        if (['completed', 'cancelled'].includes(ride.status)) {
+          console.log(`🚫 [CANCEL] Ride ${rideId} already ${ride.status}`);
+          socket.emit('cancel-error', { rideId, error: `Ride already ${ride.status}` });
+          return;
+        }
+        
+        // Update ride status in database
+        await db.updateRideStatus(rideId, 'cancelled', {
+          cancelled_at: new Date(),
+          cancelled_by: 'rider',
+          cancellation_reason: reason || 'Rider cancelled'
+        });
+        
+        console.log(`✅ [CANCEL] Ride ${rideId} status updated to cancelled`);
+        
+        // Notify the DRIVER that rider cancelled (if driver was assigned)
+        const cancellationData = {
+          rideId,
+          reason: reason || 'Rider cancelled',
+          cancelledBy: 'rider',
+          timestamp: new Date().toISOString()
+        };
+        
+        if (ride.driver_id) {
+          io.to(`user-${ride.driver_id}`).emit('ride-cancelled', cancellationData);
+          console.log(`📡 [CANCEL] Emitted ride-cancelled to driver ${ride.driver_id}`);
+          
+          // Reset driver availability
+          updateDriverAvailability(ride.driver_id, {
+            isAvailable: true,
+            currentRideId: null
+          });
+          console.log(`✅ [CANCEL] Driver ${ride.driver_id} availability reset`);
+        }
+        
+        // Confirm cancellation to rider
+        socket.emit('cancel-confirmed', { rideId, status: 'cancelled' });
+        
+        // Clean up in-memory maps
+        activeRideRequests.delete(rideId);
+        cascadingRequests.delete(rideId);
+        
+      } catch (error) {
+        console.error(`❌ [CANCEL] Error cancelling ride ${rideId}:`, error);
+        socket.emit('cancel-error', { rideId, error: 'Failed to cancel ride' });
+      }
+    });
+
+    // Handle ride cancellation acknowledgment from driver
+    socket.on('ride-cancelled-ack', async (data) => {
     
     try {
       console.log(`✅ Driver ${driverId} acknowledged ride cancellation for ride ${rideId} at ${timestamp}`);
@@ -7679,9 +7808,9 @@ io.on('connection', (socket) => {
 
       if (!rideRequest) {
         // Temporarily muted for testing
-        // socket.emit('ride-already-taken', { rideId });
+         socket.emit('ride-already-taken', { rideId });
         console.log('⚠️ Ride request not found in activeRideRequests, but continuing...');
-        // return;
+         return;
       }
 
       // Clear any pending timeouts
@@ -7725,7 +7854,7 @@ io.on('connection', (socket) => {
       });
 
       // Notify rider
-      const riderId = updatedRide.rider_id;
+      const riderId = rideRequest?.riderId || updatedRide?.rider_id;
       io.to(`user-${riderId}`).emit('ride-accepted', {
         ride: updatedRide,
         driver: {
@@ -7775,12 +7904,25 @@ io.on('connection', (socket) => {
       }
       
       // Process like a normal ride acceptance
-      const rideRequest = activeRideRequests.get(rideId);
-      
-      if (!rideRequest) {
-        socket.emit('ride-already-taken', { rideId });
-        return;
-      }
+      let rideRequest = activeRideRequests.get(rideId);
+if (!rideRequest) {
+  // Ride might have timed out but still valid - fetch from database
+  console.log(`⚠️ Ride ${rideId} not in memory, fetching from database...`);
+  const rideResult = await db.query('SELECT * FROM rides WHERE id = $1', [rideId]);
+  if (rideResult.rows.length === 0 || rideResult.rows[0].status !== 'requested') {
+    socket.emit('ride-already-taken', { rideId });
+    return;
+  }
+  const dbRide = rideResult.rows[0];
+  rideRequest = {
+    riderId: dbRide.rider_id,
+    pickup: { lat: dbRide.pickup_lat, lng: dbRide.pickup_lng },
+    destination: { lat: dbRide.destination_lat, lng: dbRide.destination_lng },
+    pickupAddress: dbRide.pickup_address,
+    destinationAddress: dbRide.destination_address,
+    estimatedFare: dbRide.estimated_fare
+  };
+}
       
       // Update ride status
       const updatedRide = await db.updateRideStatus(rideId, 'accepted', {
@@ -7843,7 +7985,7 @@ io.on('connection', (socket) => {
       }
 
       // 🎉 NEW: Notify rider with FLASHING success and driver location
-      const riderId = updatedRide.rider_id;
+      const riderId = rideRequest?.riderId || updatedRide?.rider_id;
       io.to(`user-${riderId}`).emit('ride-accepted', {
         ride: updatedRide,
         driver: {
