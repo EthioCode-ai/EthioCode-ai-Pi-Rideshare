@@ -1,16 +1,14 @@
 /**
- * ActiveRideScreen
- * Main screen for managing an active ride from acceptance to completion
+ * ActiveRideScreen - SAFE VERSION v2
  * 
- * Phase 2.6 - Updated:
- * - Fixed route polyline rendering
- * - Geofence-based "I've Arrived" visibility
- * - Auto-trigger status changes when entering geofence
- * - Proper turn-by-turn display
- * - Grace period from market settings (now 2 min)
+ * This version:
+ * 1. Checks if SDK native module is available before using it
+ * 2. Properly extracts ride params (handles both shapes)
+ * 3. Calls hooks unconditionally (React requirement)
+ * 4. Has extensive logging for debugging
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -21,18 +19,20 @@ import {
   BackHandler,
   TouchableOpacity,
   Text,
+  NativeModules,
+  ScrollView,
+  Animated,
+  PanResponder,
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
+import { useKeepAwake } from 'expo-keep-awake';
 import { StackNavigationProp } from '@react-navigation/stack';
 
 // Existing services
 import locationService from '../services/location.service';
 import socketService from '../services/socket.service';
 import apiService from '../services/api.service';
-import StatusRow from '../components/ActiveRide/StatusRow';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Speech from 'expo-speech';
-import { StorageKeys } from '../constants/StorageKeys';
+
 
 // Types
 import {
@@ -44,1617 +44,1092 @@ import {
 } from '../types/ride.types';
 import type { Location } from '../types';
 
-// Components
-import RouteMapView, { RouteMapViewRef } from '../components/ActiveRide/RouteMapView';
-import NavigationBar, { NavigationStep } from '../components/ActiveRide/NavigationBar';
-import RiderCard from '../components/ActiveRide/RiderCard';
-import WaitTimer from '../components/ActiveRide/WaitTimer';
-import TripActionButton from '../components/ActiveRide/TripActionButton';
-
-// Utils
-import { decodePolyline, Coordinate, haversineDistance } from '../utils/polylineDecoder';
-
 // Navigation types
 import { MainStackParamList } from '../navigation/RootNavigator';
 
+// ============================================================================
+// SDK AVAILABILITY CHECK - Runs at module load time
+// ============================================================================
+const checkSDKAvailability = (): boolean => {
+  try {
+    const { NavModule } = NativeModules;
+    console.log('🔍 [SDK CHECK] NativeModules.NavModule:', NavModule ? 'EXISTS' : 'NULL');
+    
+    if (!NavModule) {
+      console.warn('⚠️ [SDK CHECK] NavModule is null - SDK not available');
+      return false;
+    }
+    
+    const hasInit = typeof NavModule.initializeNavigator === 'function';
+    console.log('🔍 [SDK CHECK] initializeNavigator:', hasInit ? 'EXISTS' : 'MISSING');
+    
+    return hasInit;
+  } catch (error) {
+    console.error('❌ [SDK CHECK] Error checking SDK availability:', error);
+    return false;
+  }
+};
+const CAR_ROTATION_OFFSET = 0;
+const IS_SDK_AVAILABLE = checkSDKAvailability();
+console.log('🚀 [SDK CHECK] Final result: SDK is', IS_SDK_AVAILABLE ? 'AVAILABLE ✅' : 'NOT AVAILABLE ❌');
+
+// ============================================================================
+// CONDITIONAL SDK IMPORTS
+// ============================================================================
+let useGoogleNav: any = null;
+let NavigationView: any = null;
+
+if (IS_SDK_AVAILABLE) {
+  try {
+    console.log('📦 [SDK IMPORT] Attempting to import SDK hooks...');
+    const sdkModule = require('@googlemaps/react-native-navigation-sdk');
+    useGoogleNav = sdkModule.useNavigation;
+    NavigationView = sdkModule.NavigationView;
+    console.log('📦 [SDK IMPORT] useNavigation hook imported:', useGoogleNav ? 'SUCCESS ✅' : 'FAILED ❌');
+  } catch (error) {
+    console.error('❌ [SDK IMPORT] Failed to import SDK:', error);
+  }
+}
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
 type ActiveRideScreenRouteProp = RouteProp<MainStackParamList, 'ActiveRide'>;
 type ActiveRideScreenNavigationProp = StackNavigationProp<MainStackParamList, 'ActiveRide'>;
 
-// API base URL
 const API_BASE_URL = 'https://ethiocode-ai-pi-rideshare.onrender.com';
 
-// Default market settings (will be fetched from API)
-const DEFAULT_MARKET_SETTINGS = {
-  gracePeriodSeconds: 120, // 2 minutes (updated)
-  waitRatePerMinute: 0.35,
-  arrivalRadiusMeters: 35,
+// ============================================================================
+// MAIN COMPONENT - Routes to SDK or Fallback mode
+// ============================================================================
+const ActiveRideScreen = (props: any) => {
+  console.log('🎬 [ActiveRideScreen] Rendering, SDK available:', IS_SDK_AVAILABLE);
+  
+  if (IS_SDK_AVAILABLE && useGoogleNav) {
+    console.log('🎬 [ActiveRideScreen] Using SDK MODE');
+    return <ActiveRideWithSDK {...props} />;
+  } else {
+    console.log('🎬 [ActiveRideScreen] Using FALLBACK MODE (no SDK)');
+    return <ActiveRideFallback {...props} />;
+  }
 };
 
-const ActiveRideScreen: React.FC = () => {
+// ============================================================================
+// SDK MODE COMPONENT
+// ============================================================================
+const ActiveRideWithSDK = (props: any) => {
+  useKeepAwake();
+  console.log('🔷 [WithSDK] Component function starting...');
+  
   const navigation = useNavigation<ActiveRideScreenNavigationProp>();
   const route = useRoute<ActiveRideScreenRouteProp>();
-  const mapRef = useRef<RouteMapViewRef>(null);
+  const [isPreparingNav, setIsPreparingNav] = useState(true);
+  const [showNavView, setShowNavView] = useState(true); // ADD THIS LINE
+  const [prepProgress, setPrepProgress] = useState(0);
+  const carMarkerRef = useRef<any>(null);
 
-  // Get ride data from navigation params
-  const { ride: initialRide , routeData } = route.params;
+  // *** SLIDER AT PICKUP ***
+
+  const [sliderPosition, setSliderPosition] = useState(0);
+  const [isSliding, setIsSliding] = useState(false);
+
+  // *** PARAM EXTRACTION - Handle both shapes ***
+  const params = route.params as any;
+  const initialRide: ActiveRide = params?.ride ?? params;
+  const routeData = params?.routeData ?? null;
+  
+  console.log('🔷 [WithSDK] Extracted initialRide:', initialRide ? 'EXISTS' : 'NULL');
+  console.log('🔷 [WithSDK] Ride ID:', initialRide?.rideId);
+  console.log('🔷 [WithSDK] Status:', initialRide?.status);
+
+  // *** SDK HOOK - Must be called unconditionally ***
+  const navContext = useGoogleNav();
+  const navigationController = navContext?.navigationController ?? null;
+  const addListeners = navContext?.addListeners ?? (() => {});
+  const removeListeners = navContext?.removeListeners ?? (() => {});
+  
+  console.log('🔷 [WithSDK] navigationController:', navigationController ? 'EXISTS' : 'NULL');
+
+  // Refs
+  const navigationInitialized = useRef(false);
+  const rideRef = useRef(initialRide);
+  
 
   // Core state
   const [ride, setRide] = useState<ActiveRide>(initialRide);
-  const rideRef = useRef(ride);
   const [user, setUser] = useState<any>(null);
   const [driverLocation, setDriverLocation] = useState<Location | null>(null);
   const [heading, setHeading] = useState(0);
-
-  // Movement prompt state
-  const [showMovementPrompt, setShowMovementPrompt] = useState(false);
-  const acceptanceLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
-  const movementCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const promptDismissTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Route state
-  const [routeCoordinates, setRouteCoordinates] = useState<Coordinate[]>([]);
-  const [navigationSteps, setNavigationSteps] = useState<NavigationStep[]>([]);
-  const navigationStepsRef = useRef<NavigationStep[]>([]);
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const currentStepIndexRef = useRef(0);
-  const [eta, setEta] = useState('');
-  const [totalDistance, setTotalDistance] = useState('');
-  const [voiceGuidanceEnabled, setVoiceGuidanceEnabled] = useState(true);
-  const lastSpokenStepRef = useRef<number>(-1);
-  // Next action (turn-by-turn) - separate from total
-  const [nextActionEta, setNextActionEta] = useState('');
-  const [nextActionDistance, setNextActionDistance] = useState('');
-  const [isCalculatingRoute, setIsCalculatingRoute] = useState(true);
-  const [bottomCardExpanded, setBottomCardExpanded] = useState(false);
-
-  // Rerouting state
-  const lastRerouteTimeRef = useRef<number>(0);
-  const lastRouteRefreshRef = useRef<number>(0);
-  const isReroutingRef = useRef<boolean>(false);
-  
-  // Geofence state
-  const [isWithinGeofence, setIsWithinGeofence] = useState(false);
-  const [distanceToTargetMeters, setDistanceToTargetMeters] = useState<number | null>(null);
-  
-  // Wait timer state
-  const [waitStartTime, setWaitStartTime] = useState<Date | null>(null);
-  
-  // Market settings
-  const [marketSettings, setMarketSettings] = useState(DEFAULT_MARKET_SETTINGS);
-  
-  // UI state
   const [isLoading, setIsLoading] = useState(false);
+  const [navViewController, setNavViewController] = useState<any>(null);
+  const [mapViewController, setMapViewController] = useState<any>(null);
+  const [panelExpanded, setPanelExpanded] = useState(false);
+  const [waitSeconds, setWaitSeconds] = useState<number | null>(null);
+  const sliderX = useRef(new Animated.Value(0)).current;
 
-  // Track if we've already auto-triggered arrival (prevent double triggers)
-  const hasAutoTriggeredArrival = useRef(false);
-
-  // ==================== INITIALIZATION ====================
-
-  // Load user data
-useEffect(() => {
-  const loadUser = async () => {
-    const userData = await AsyncStorage.getItem('@pi_rideshare:user_data');
-    if (userData) {
-      setUser(JSON.parse(userData));
-    }
-  };
-  loadUser();
-}, []);
-
-  // Keep rideRef in sync with ride state
+  // Update ref when ride changes
   useEffect(() => {
     rideRef.current = ride;
   }, [ride]);
 
-  // 90-second movement check for en_route_to_pickup
+  // *** LOAD USER DATA ***
   useEffect(() => {
-    if (ride.status === 'en_route_to_pickup' && driverLocation) {
-      // Capture initial location when ride is accepted
-      if (!acceptanceLocationRef.current) {
-        acceptanceLocationRef.current = {
-          latitude: driverLocation.latitude,
-          longitude: driverLocation.longitude,
-        };
-        console.log('📍 Captured acceptance location:', acceptanceLocationRef.current);
+    const loadUser = async () => {
+      try {
+        const userData = await apiService.get('/driver/profile');
+        setUser(userData);
+        console.log('🔷 [WithSDK] User loaded:', userData?.id);
+      } catch (error) {
+        console.error('❌ [WithSDK] Failed to load user:', error);
+      }
+    };
+    loadUser();
+    }, []);
+
+    // *** LISTEN FOR RIDER CANCELLATION ***
+    useEffect(() => {
+      console.log('🔷 [WithSDK] Setting up ride-cancelled listener');
+      
+      socketService.onRideCancelled((data) => {
+        console.log('❌ [WithSDK] Ride cancelled by rider:', data);
         
-        // Start 90-second timer
-        movementCheckTimerRef.current = setTimeout(() => {
-          checkMovementTowardPickup();
-        }, 90000);
-      }
-    } else {
-      // Clear timers and reset when not en_route_to_pickup
-      if (movementCheckTimerRef.current) {
-        clearTimeout(movementCheckTimerRef.current);
-        movementCheckTimerRef.current = null;
-      }
-      if (promptDismissTimerRef.current) {
-        clearTimeout(promptDismissTimerRef.current);
-        promptDismissTimerRef.current = null;
-      }
-      acceptanceLocationRef.current = null;
-      setShowMovementPrompt(false);
-    }
-    
-    return () => {
-      if (movementCheckTimerRef.current) {
-        clearTimeout(movementCheckTimerRef.current);
-      }
-      if (promptDismissTimerRef.current) {
-        clearTimeout(promptDismissTimerRef.current);
-      }
-    };
-  }, [ride.status, driverLocation]);
-
-  useEffect(() => {
-    console.log('🚗 ActiveRideScreen mounted');
-    initializeScreen();
-
-   
-    
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      handleBackPress();
-      return true;
-    });
-
-    // Listen for rider cancellation
-    socketService.onRideCancelled((data) => {
-      console.log('❌ Rider cancelled the ride:', data);
-      Alert.alert(
-        'Ride Cancelled',
-        'The rider has cancelled this ride.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Home', params: { stayOnline: true } }],
-              });
+        // Clean up navigation SDK
+        if (navigationController) {
+          console.log('🛑 [CLEANUP] Rider cancelled - stopping SDK...');
+          navigationController.stopGuidance().catch(() => {});
+          navigationController.clearDestinations().catch(() => {});
+          navigationController.cleanup().catch(() => {});
+        }
+        
+        // Hide NavigationView
+        setShowNavView(false);
+        
+        // Show alert and navigate home
+        Alert.alert(
+          'Ride Cancelled',
+          data?.reason || 'The rider has cancelled this ride.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                navigation.dispatch(
+                  CommonActions.reset({
+                    index: 0,
+                    routes: [{ name: 'Home' }],
+                  })
+                );
+              },
             },
-          },
-        ]
-      );
-    });
+          ]
+        );
+      });
+      
+      return () => {
+        socketService.off('ride-cancelled');
+      };
+    }, [navigationController, navigation]);
 
-    return () => {
-      backHandler.remove();
-      locationService.stopWatchingLocation();
-      socketService.off('ride-cancelled');
-    };
-  }, []);
+    // *** NAVIGATION PREP DELAY ***
 
-
-   // Load voice guidance setting
+  // *** NAVIGATION PREP DELAY ***
 useEffect(() => {
-  const loadVoiceSetting = async () => {
-    try {
-      const localSettings = await AsyncStorage.getItem('@driver_settings');
-      if (localSettings) {
-        const settings = JSON.parse(localSettings);
-        setVoiceGuidanceEnabled(settings.voiceGuidance ?? true);
-      }
-    } catch (error) {
-      console.log('Error loading voice setting:', error);
+  let progress = 0;
+  const interval = setInterval(() => {
+    progress += 2;
+    setPrepProgress(progress);
+    if (progress >= 100) {
+      clearInterval(interval);
+      setIsPreparingNav(false);
     }
-  };
-  loadVoiceSetting();
+  }, 100);
+  
+  return () => clearInterval(interval);
 }, []);
 
-  const initializeScreen = async () => {
-  console.log('📦 routeData received:', JSON.stringify(routeData, null, 2));
-  
-  // Start location tracking
-  await startLocationTracking();
 
-  // Get initial location
-  const location = await locationService.getCurrentLocation();
-  if (location) {
-    setDriverLocation(location);
-    if (location.heading) setHeading(location.heading);
-  }
-
-  // Use route data passed from HomeScreen
-  if (routeData?.toPickup) {
-    const pickupRoute = routeData.toPickup;
-    
-    // Decode polyline
-    if (pickupRoute.polyline) {
-      const coords = decodePolyline(pickupRoute.polyline);
-      setRouteCoordinates(coords);
-      console.log('📍 Polyline decoded:', coords.length, 'points');
-    }
-    
-    // Set navigation steps
-    if (pickupRoute.steps) {
-      const steps = pickupRoute.steps.map((step: any) => ({
-      instruction: step.instruction || '',
-      distance: step.distance?.text || `${step.distance?.miles?.toFixed(1)} mi`,
-      duration: step.duration?.text || `${step.duration?.minutes} min`,
-      maneuver: step.maneuver || '',
-      endLocation: step.end_location ? {
-      lat: step.end_location.lat,
-      lng: step.end_location.lng,
-      } : undefined,
-    }));
-      setNavigationSteps(steps);
-      navigationStepsRef.current = steps;
-      console.log('📍 Navigation steps:', steps.length);
-      
-      // Speak first instruction
-      console.log('🔊 Voice check - steps:', steps.length, 'instruction:', steps[0]?.instruction?.substring(0, 50));
-      if (steps.length > 0 && steps[0].instruction) {
-        console.log('🔊 Will speak in 1 second...');
-        setTimeout(() => {
-          console.log('🔊 Speaking now:', steps[0].instruction.substring(0, 50));
-          speakInstruction(steps[0].instruction);
-          lastSpokenStepRef.current = 0;
-        }, 1000);
-      } else {
-        console.log('🔊 No steps or no instruction to speak');
-      }
-    }
-    
-    // Set ETA and distance
-    const miles = pickupRoute.distance?.miles || 0;
-    const minutes = pickupRoute.duration?.adjusted_minutes || 0;
-    setEta(`${Math.round(minutes)} min`);
-    setTotalDistance(`${miles.toFixed(1)} mi`);
-    console.log('📍 ETA:', minutes, 'min, Distance:', miles, 'mi');
-    
-    setIsCalculatingRoute(false);
-  }
-
-  // Fetch market settings
-  fetchMarketSettings();
-};
-
-  // ==================== LOCATION TRACKING ====================
-
-  const startLocationTracking = async () => {
-    const hasPermission = await locationService.requestPermissions();
-    if (!hasPermission) {
-      Alert.alert('Error', 'Location permission is required for navigation');
+  // *** SDK INITIALIZATION ***
+  useEffect(() => {
+    if (isPreparingNav || !navigationController || !navViewController) {
+      console.warn('🔷 [WithSDK] No navigationController - skipping SDK init');
       return;
     }
 
-    await locationService.startWatchingLocation(
-      (location) => {
-        setDriverLocation(location);
-        if (location.heading) {
-          setHeading(location.heading);
-        }
+    let isMounted = true;
 
-        // Broadcast location to rider via socket
-        if (socketService.connected) {
-          socketService.sendLocationUpdate({
-          driverId: user?.id || '',
-          latitude: location.latitude,
-          longitude: location.longitude,
-          heading: location.heading,
-          speed: location.speed,
-          });
-        }
+    const initializeNavigation = async () => {
+      if (navigationInitialized.current) {
+        console.log('🔷 [WithSDK] Already initialized, skipping');
+        return;
+      }
 
-       // Refresh route from Google every 3 seconds (real-time navigation)
-        const now = Date.now();
-        if (now - lastRouteRefreshRef.current > 3000) {
-          lastRouteRefreshRef.current = now;
-          refreshRouteFromGoogle(location);
-        }
-
-
-        // Check geofence for arrival
-        checkGeofence(location);
+      try {
+        console.log('🔷 [WithSDK] Calling navigationController.init()...');
+        await navigationController.init();
         
-        // Check step progression for navigation updates
-        checkStepProgression(location);
-      },
-      {
-        distanceInterval: 5,
-        timeInterval: 500,
+        if (!isMounted) return;
+        
+        console.log('🔷 [WithSDK] init() completed successfully! ✅');
+        navigationInitialized.current = true;
+
+        addListeners({
+          onNavigationReady: async () => {
+            console.log('🔷 [WithSDK] onNavigationReady callback fired');
+            if (navViewController) {
+              navViewController.setSpeedometerEnabled(true);
+              navViewController.setSpeedLimitIconEnabled(true);
+              
+            }
+            // NOW set destination - navigation is truly ready
+            if (rideRef.current?.status === 'en_route_to_pickup' && rideRef.current?.pickup) {
+              console.log('🔷 [WithSDK] Setting destination to pickup...');
+              try {
+                await navigationController.setDestinations([{
+                  title: 'Pickup',
+                  position: {
+                    lat: rideRef.current.pickup.lat,
+                    lng: rideRef.current.pickup.lng,
+                  },
+                }]);
+                await navigationController.startGuidance();
+                console.log('🔷 [WithSDK] Guidance started! ✅');
+              } catch (err) {
+                console.error('❌ [WithSDK] Failed to set destination:', err);
+              }
+            }
+          },
+          onLocationChanged: async (location: any) => {
+            if (location) {
+              setDriverLocation({
+                latitude: location.lat,
+                longitude: location.lng,
+              });
+              setHeading(location.bearing || 0);
+              
+              // Update car marker position and rotation
+              if (mapViewController) {
+                // Remove old marker
+                if (carMarkerRef.current) {
+                  try {
+                    mapViewController.removeMarker(carMarkerRef.current.id);
+                  } catch (e) {}
+                }
+                
+                // Add new marker with updated position/rotation
+                try {
+                  carMarkerRef.current = await mapViewController.addMarker({
+                    position: { lat: location.lat, lng: location.lng },
+                    rotation: (location.bearing || 0) + CAR_ROTATION_OFFSET,
+                    flat: true,
+                    title: 'Driver',
+                   // imgPath: 'car_marker',
+                  });
+                } catch (e) {
+                  console.warn('Failed to add car marker:', e);
+                }
+              }
+            }
+          },
+          onArrival: async (event: any) => {
+            console.log('🔷 [WithSDK] onArrival:', event);
+            
+            // Auto-update status to at_pickup
+            try {
+              await apiService.put(`/rides/${rideRef.current.rideId}/status`, { status: 'at_pickup' });
+              setRide(prev => ({ ...prev, status: 'at_pickup' }));
+              
+              // Notify rider that driver has arrived
+              await apiService.post(`/rides/${rideRef.current.rideId}/notify-arrival`);
+              console.log('🔷 [WithSDK] Rider notified of arrival');
+            } catch (err) {
+              console.error('❌ [WithSDK] Failed to update arrival status:', err);
+            }
+            
+            setPanelExpanded(true);
+          },
+        });
+          
+        
+
+      } catch (error) {
+        console.error('❌ [WithSDK] navigationController.init() FAILED:', error);
       }
-    );
-  };
+    };
 
-  // ==================== ROUTE CALCULATION ====================
+    initializeNavigation();
 
-  const calculateRoute = async (currentLocation: Location) => {
-    setIsCalculatingRoute(true);
+    return () => {
+      isMounted = false;
+      if (navigationController) {
+        removeListeners({});
+        // Force stop SDK navigation on unmount
+        navigationController.stopGuidance().catch(() => {});
+        navigationController.clearDestinations().catch(() => {});
+        navigationController.cleanup().catch(() => {});
+      }
+    };
+ }, [isPreparingNav, navigationController, navViewController, addListeners, removeListeners]);
+
+// *** ACTION HANDLERS ***
+const handleStatusChange = async (newStatus: TripStatus) => {
+  console.log('🔷 [WithSDK] Status change:', ride?.status, '->', newStatus);
+  setIsLoading(true);
+  
+  try {
+      // Use socket for cancellation, API for other status changes
+      if (newStatus === 'cancelled') {
+        // Cancel via socket
+        if (user?.id) {
+          socketService.cancelRide(user.id, ride.rideId, 'Driver cancelled');
+        }
+      } else {
+        // Update via API for other statuses
+        await apiService.put(`/rides/${ride.rideId}/status`, { status: newStatus });
+      }
     
-    try {
-      const token = await apiService.getToken();
-      console.log('🔑 Token retrieved:', token ? token.substring(0, 20) + '...' : 'NULL');
-      if (!token) {
-  console.error('No auth token');
-  return;
-      }
-
-      console.log('📍 Calculating route from:', currentLocation);
-      console.log('📍 Pickup:', ride.pickup);
-      console.log('📍 Destination:', ride.destination);
-
-      const response = await fetch(`${API_BASE_URL}/api/routes/calculate`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          driverLocation: {
-            lat: currentLocation.latitude,
-            lng: currentLocation.longitude,
-            heading: currentLocation.heading,
-          },
-          pickup: {
-            lat: ride.pickup.lat,
-            lng: ride.pickup.lng,
-          },
-          destination: {
+    // Update local state
+    setRide(prev => ({ ...prev, status: newStatus }));
+    
+    // Update navigation destination
+    if (navigationController && navigationInitialized.current) {
+      if (newStatus === 'in_trip' && ride?.destination) {
+        await navigationController.setDestinations([{
+          title: 'Dropoff',
+          position: {
             lat: ride.destination.lat,
             lng: ride.destination.lng,
           },
-        }),
-      });
+        }]);
+        await navigationController.startGuidance();
+      } else if (newStatus === 'completed' || newStatus === 'cancelled') {
+        await navigationController.stopGuidance();
+      }
+    }
 
-      const data = await response.json();
-      console.log('📍 Route API response:', data.success);
-
-      if (data.success) {
-        // Select appropriate route based on status
-        const routeData = (ride.status === 'en_route_to_pickup' || ride.status === 'at_pickup')
-          ? data.toPickup
-          : data.toDestination;
-
-        if (routeData) {
-          // Decode polyline
-          const polyline = routeData.polyline || '';
-          console.log('📍 Polyline length:', polyline.length);
-          
-          const coords = decodePolyline(polyline);
-          console.log('📍 Decoded coordinates:', coords.length);
-          
-          setRouteCoordinates(coords);
-
-          // Parse navigation steps from Google Directions API format
-          const steps: NavigationStep[] = (routeData.steps || []).map((step: any) => ({
-            instruction: step.html_instructions || step.instruction || '',
-            distance: step.distance?.text || `${(step.distance?.value / 1609.34).toFixed(1)} mi` || '',
-            duration: step.duration?.text || `${Math.round(step.duration?.value / 60)} min` || '',
-            maneuver: step.maneuver || '',
-          }));
-          
-          console.log('📍 Navigation steps:', steps.length);
-          setNavigationSteps(steps);
-          navigationStepsRef.current = steps;
-          setCurrentStepIndex(0);
-
-          // Set ETA and distance - extract from nested objects
-          const distanceMiles = routeData.distance?.miles || 0;
-          const durationMinutes = routeData.duration?.adjusted_minutes || routeData.duration?.base_minutes || 0;
-          
-          setEta(`${Math.round(durationMinutes)} min`);
-          setTotalDistance(`${distanceMiles.toFixed(1)} mi`);
-          
-          console.log('📍 ETA:', `${Math.round(durationMinutes)} min`, 'Distance:', `${distanceMiles.toFixed(1)} mi`);
-
-          // Update geofence radius if provided
-          if (data.geofence?.radius_meters) {
-            setMarketSettings(prev => ({
-              ...prev,
-              arrivalRadiusMeters: data.geofence.radius_meters,
-            }));
+    // Navigate back on completion or cancellation
+      if (newStatus === 'completed' || newStatus === 'cancelled') {
+  // Clean up navigation SDK
+    if (navigationController) {
+     try {
+       console.log('🛑 [CLEANUP] Starting SDK cleanup...');
+       await navigationController.stopGuidance();
+       console.log('🛑 [CLEANUP] stopGuidance() completed');
+       await navigationController.clearDestinations();
+       console.log('🛑 [CLEANUP] clearDestinations() completed');
+       await navigationController.cleanup();
+       console.log('🛑 [CLEANUP] cleanup() completed');
+       } catch (cleanupError) {
+       console.error('🛑 [CLEANUP] ERROR:', cleanupError);
+     }
+    } else {
+       console.log('🛑 [CLEANUP] No navigationController available!');
+    }
+        
+        // Notify rider if cancelled
+        if (newStatus === 'cancelled') {
+          try {
+            await apiService.post(`/rides/${ride.rideId}/notify-cancellation`);
+          } catch (notifyError) {
+            console.warn('🔷 [WithSDK] Failed to notify rider:', notifyError);
           }
         }
-      } else {
-        console.error('Route calculation failed:', data.message || data.error);
-      }
-    } catch (error) {
-      console.error('Route calculation error:', error);
-    } finally {
-      setIsCalculatingRoute(false);
-    }
-  };
-
-
-    // Voice guidance
-  const speakInstruction = (instruction: string) => {
-  console.log('🔊 speakInstruction called, voiceEnabled:', voiceGuidanceEnabled);
-  if (!voiceGuidanceEnabled) {
-    console.log('🔊 Voice guidance disabled, skipping');
-    return;
-  }
-    try {
-      const cleanText = instruction
-        .replace(/<[^>]*>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .trim();
-      
-      if (cleanText) {
-        Speech.stop();
-        Speech.speak(cleanText, {
-          language: 'en-US',
-          rate: 0.9,
-          pitch: 1.0,
-        });
-      }
-    } catch (error) {
-      console.log('Speech error:', error);
-    }
-  };
-
-  
-  // ==================== STEP PROGRESSION ====================
-
-  const checkStepProgression = (location: Location) => {
-  const steps = navigationStepsRef.current;
-  console.log(`📍 checkStepProgression called - steps: ${steps.length}, currentIndex: ${currentStepIndex}`);
-  
-  if (steps.length === 0) return;
-
-  // ========== STEP ADVANCEMENT (with catch-up) ==========
-  // Find the correct current step based on position
-  let newStepIndex = currentStepIndexRef.current;
-
-  for (let i = currentStepIndex; i < steps.length - 1; i++) {
-    const thisStep = steps[i];
-    const nextStep = steps[i + 1];
-    
-    if (!thisStep?.endLocation || !nextStep?.endLocation) continue;
-    
-    const distanceToThisEnd = haversineDistance(
-      location.latitude,
-      location.longitude,
-      thisStep.endLocation.lat,
-      thisStep.endLocation.lng
-    );
-    
-    const distanceToNextEnd = haversineDistance(
-      location.latitude,
-      location.longitude,
-      nextStep.endLocation.lat,
-      nextStep.endLocation.lng
-    );
-    
-    // If within 50m of this step's end, OR closer to next step's end, advance
-    if (distanceToThisEnd < 50 || distanceToNextEnd < distanceToThisEnd) {
-      newStepIndex = i + 1;
-      console.log(`📍 Should be on step ${newStepIndex + 1}/${steps.length}`);
-    } else {
-      break;
-    }
-  }
-
-  if (newStepIndex !== currentStepIndexRef.current) {
-    console.log(`📍 Advancing from step ${currentStepIndexRef.current + 1} to ${newStepIndex + 1}`);
-    currentStepIndexRef.current = newStepIndex;
-    setCurrentStepIndex(newStepIndex);
-    
-    // Speak the new instruction
-    const newStep = steps[newStepIndex];
-    if (newStep?.instruction && newStepIndex !== lastSpokenStepRef.current) {
-      lastSpokenStepRef.current = newStepIndex;
-      // speakInstruction(newStep.instruction);  // Temporarily disabled
-    }
-}
-
-  // ========== Use the correct step for calculations ==========
-  const activeStepIndex = newStepIndex;
-  const currentStep = steps[activeStepIndex];
-  
-  console.log(`📍 Active step endLocation:`, currentStep?.endLocation);
-
-  if (!currentStep?.endLocation) {
-    console.log(`📍 No endLocation for step ${activeStepIndex}, using target fallback`);
-    // Fallback: calculate directly to target
-    const target = rideRef.current.status === 'en_route_to_pickup' 
-      ? rideRef.current.pickup 
-      : rideRef.current.destination;
-    
-    const directDistance = haversineDistance(
-      location.latitude,
-      location.longitude,
-      target.lat,
-      target.lng
-    );
-    
-    // Update total distance
-    const totalMiles = directDistance / 1609.34;
-    setTotalDistance(totalMiles > 0.1 ? `${totalMiles.toFixed(1)} mi` : `${Math.round(directDistance * 3.28084)} ft`);
-    
-    // Update ETA (assuming 25 mph average)
-    const etaMinutes = Math.round((totalMiles / 25) * 60);
-    setEta(etaMinutes > 0 ? `${etaMinutes} min` : '< 1 min');
-    
-    return;
-  }
-
-  // ========== NEXT ACTION (distance to current step end) ==========
-  const distanceToStepEnd = haversineDistance(
-    location.latitude,
-    location.longitude,
-    currentStep.endLocation.lat,
-    currentStep.endLocation.lng
-  );
-  console.log(`📍 Distance to step end: ${distanceToStepEnd.toFixed(0)}m`);
-
-  // Format next action distance
-  const nextDistanceFeet = Math.round(distanceToStepEnd * 3.28084);
-  const nextDistanceText = nextDistanceFeet > 500
-    ? `${(distanceToStepEnd / 1609.34).toFixed(1)} mi`
-    : `${nextDistanceFeet} ft`;
-  setNextActionDistance(nextDistanceText);
-
-  // Estimate next action time (assuming 25 mph average)
-  const nextEstimatedSeconds = Math.round((distanceToStepEnd / 1609.34) / 25 * 3600);
-  if (nextEstimatedSeconds < 60) {
-    setNextActionEta(`${nextEstimatedSeconds} sec`);
-  } else {
-    setNextActionEta(`${Math.round(nextEstimatedSeconds / 60)} min`);
-  }
-
-  // ========== TOTAL REMAINING (all steps from current position) ==========
-  let totalRemainingMeters = distanceToStepEnd;
-  let totalRemainingSeconds = nextEstimatedSeconds;
-
-  const remainingSteps = steps.slice(activeStepIndex + 1);
-  remainingSteps.forEach(step => {
-    const distMatch = step.distance?.match(/([\d.]+)\s*(mi|ft)/);
-    if (distMatch) {
-      const val = parseFloat(distMatch[1]);
-      const meters = distMatch[2] === 'mi' ? val * 1609.34 : val * 0.3048;
-      totalRemainingMeters += meters;
-    }
-    const durMatch = step.duration?.match(/([\d.]+)\s*(min|sec)/);
-    if (durMatch) {
-      const val = parseFloat(durMatch[1]);
-      totalRemainingSeconds += durMatch[2] === 'min' ? val * 60 : val;
-    }
-  });
-
-  // Format total distance
-  const totalFeet = Math.round(totalRemainingMeters * 3.28084);
-  const totalDistanceText = totalFeet > 500
-    ? `${(totalRemainingMeters / 1609.34).toFixed(1)} mi`
-    : `${totalFeet} ft`;
-  setTotalDistance(totalDistanceText);
-
-  // Format total ETA
-  if (totalRemainingSeconds < 60) {
-    setEta(`${Math.round(totalRemainingSeconds)} sec`);
-  } else {
-    setEta(`${Math.round(totalRemainingSeconds / 60)} min`);
-  }
-};
-
-// Helper: Calculate perpendicular distance from point to line segment
-const distanceToSegment = (
-  point: { latitude: number; longitude: number },
-  segStart: { latitude: number; longitude: number },
-  segEnd: { latitude: number; longitude: number }
-): number => {
-  const dx = segEnd.longitude - segStart.longitude;
-  const dy = segEnd.latitude - segStart.latitude;
-  
-  if (dx === 0 && dy === 0) {
-    return haversineDistance(point.latitude, point.longitude, segStart.latitude, segStart.longitude);
-  }
-  
-  const t = Math.max(0, Math.min(1, 
-    ((point.longitude - segStart.longitude) * dx + (point.latitude - segStart.latitude) * dy) / 
-    (dx * dx + dy * dy)
-  ));
-  
-  const closestLat = segStart.latitude + t * dy;
-  const closestLng = segStart.longitude + t * dx;
-  
-  return haversineDistance(point.latitude, point.longitude, closestLat, closestLng);
-};
-
-// ==================== POLYLINE DISTANCE HELPERS ====================
-// Calculate total distance along polyline from current location to end
-const distanceAlongPolylineToEnd = (
-  currentLocation: { latitude: number; longitude: number },
-  polyline: Coordinate[]
-): number => {
-  if (polyline.length < 2) return 0;
-
-  let closestIndex = 0;
-  let closestDistance = Infinity;
-  let closestT = 0;
-
-  for (let i = 0; i < polyline.length - 1; i++) {
-    const segStart = polyline[i];
-    const segEnd = polyline[i + 1];
-    
-    const dx = segEnd.longitude - segStart.longitude;
-    const dy = segEnd.latitude - segStart.latitude;
-    
-    let t = 0;
-    if (dx !== 0 || dy !== 0) {
-      t = Math.max(0, Math.min(1,
-        ((currentLocation.longitude - segStart.longitude) * dx + 
-         (currentLocation.latitude - segStart.latitude) * dy) /
-        (dx * dx + dy * dy)
-      ));
-    }
-    
-    const projLat = segStart.latitude + t * dy;
-    const projLng = segStart.longitude + t * dx;
-    
-    const dist = haversineDistance(
-      currentLocation.latitude,
-      currentLocation.longitude,
-      projLat,
-      projLng
-    );
-    
-    if (dist < closestDistance) {
-      closestDistance = dist;
-      closestIndex = i;
-      closestT = t;
-    }
-  }
-
-  let totalDistance = 0;
-
-  // Distance from projected point to end of current segment
-  const segStart = polyline[closestIndex];
-  const segEnd = polyline[closestIndex + 1];
-  const projectedLat = segStart.latitude + closestT * (segEnd.latitude - segStart.latitude);
-  const projectedLng = segStart.longitude + closestT * (segEnd.longitude - segStart.longitude);
-  
-  totalDistance += haversineDistance(projectedLat, projectedLng, segEnd.latitude, segEnd.longitude);
-
-  // Sum remaining segments to end
-  for (let i = closestIndex + 1; i < polyline.length - 1; i++) {
-    totalDistance += haversineDistance(
-      polyline[i].latitude,
-      polyline[i].longitude,
-      polyline[i + 1].latitude,
-      polyline[i + 1].longitude
-    );
-  }
-
-  return totalDistance;
-};
-
-// Calculate distance along polyline from current location to a target point
-const distanceAlongPolylineToTarget = (
-  currentLocation: { latitude: number; longitude: number },
-  targetLocation: { lat: number; lng: number },
-  polyline: Coordinate[]
-): number => {
-  if (polyline.length < 2) return 0;
-
-  // Find driver's position on polyline
-  let driverIndex = 0;
-  let driverDistance = Infinity;
-  let driverT = 0;
-
-  for (let i = 0; i < polyline.length - 1; i++) {
-    const segStart = polyline[i];
-    const segEnd = polyline[i + 1];
-    
-    const dx = segEnd.longitude - segStart.longitude;
-    const dy = segEnd.latitude - segStart.latitude;
-    
-    let t = 0;
-    if (dx !== 0 || dy !== 0) {
-      t = Math.max(0, Math.min(1,
-        ((currentLocation.longitude - segStart.longitude) * dx + 
-         (currentLocation.latitude - segStart.latitude) * dy) /
-        (dx * dx + dy * dy)
-      ));
-    }
-    
-    const projLat = segStart.latitude + t * dy;
-    const projLng = segStart.longitude + t * dx;
-    
-    const dist = haversineDistance(currentLocation.latitude, currentLocation.longitude, projLat, projLng);
-    
-    if (dist < driverDistance) {
-      driverDistance = dist;
-      driverIndex = i;
-      driverT = t;
-    }
-  }
-
-  // Find target's closest point on polyline
-  let targetIndex = 0;
-  let targetDistance = Infinity;
-  let targetT = 0;
-
-  for (let i = 0; i < polyline.length - 1; i++) {
-    const segStart = polyline[i];
-    const segEnd = polyline[i + 1];
-    
-    const dx = segEnd.longitude - segStart.longitude;
-    const dy = segEnd.latitude - segStart.latitude;
-    
-    let t = 0;
-    if (dx !== 0 || dy !== 0) {
-      t = Math.max(0, Math.min(1,
-        ((targetLocation.lng - segStart.longitude) * dx + 
-         (targetLocation.lat - segStart.latitude) * dy) /
-        (dx * dx + dy * dy)
-      ));
-    }
-    
-    const projLat = segStart.latitude + t * dy;
-    const projLng = segStart.longitude + t * dx;
-    
-    const dist = haversineDistance(targetLocation.lat, targetLocation.lng, projLat, projLng);
-    
-    if (dist < targetDistance) {
-      targetDistance = dist;
-      targetIndex = i;
-      targetT = t;
-    }
-  }
-
-  // If target is behind driver, return 0
-  if (targetIndex < driverIndex || (targetIndex === driverIndex && targetT <= driverT)) {
-    return 0;
-  }
-
-  let totalDistance = 0;
-
-  if (driverIndex === targetIndex) {
-    // Same segment - calculate partial distance
-    const segStart = polyline[driverIndex];
-    const segEnd = polyline[driverIndex + 1];
-    const segLength = haversineDistance(segStart.latitude, segStart.longitude, segEnd.latitude, segEnd.longitude);
-    totalDistance = segLength * (targetT - driverT);
-  } else {
-    // Driver's remaining distance in current segment
-    const driverSegStart = polyline[driverIndex];
-    const driverSegEnd = polyline[driverIndex + 1];
-    const driverSegLength = haversineDistance(
-      driverSegStart.latitude, driverSegStart.longitude,
-      driverSegEnd.latitude, driverSegEnd.longitude
-    );
-    totalDistance += driverSegLength * (1 - driverT);
-
-    // Full segments between
-    for (let i = driverIndex + 1; i < targetIndex; i++) {
-      totalDistance += haversineDistance(
-        polyline[i].latitude, polyline[i].longitude,
-        polyline[i + 1].latitude, polyline[i + 1].longitude
-      );
-    }
-
-    // Target's portion of its segment
-    const targetSegStart = polyline[targetIndex];
-    const targetSegEnd = polyline[targetIndex + 1];
-    const targetSegLength = haversineDistance(
-      targetSegStart.latitude, targetSegStart.longitude,
-      targetSegEnd.latitude, targetSegEnd.longitude
-    );
-    totalDistance += targetSegLength * targetT;
-  }
-
-  return totalDistance;
-};
-
-// ==================== REROUTING LOGIC ====================
-const checkOffRoute = (location: Location): boolean => {
-  // Don't check if no route coordinates
-  if (routeCoordinates.length < 2) return false;
-
-  // Find minimum distance to any point on route
-  let minDistance = Infinity;
-  for (const coord of routeCoordinates) {
-    const dist = haversineDistance(
-      location.latitude,
-      location.longitude,
-      coord.latitude,
-      coord.longitude
-    );
-    if (dist < minDistance) minDistance = dist;
-  }
-
-  // If more than 100 meters off route, trigger reroute
-  const isOffRoute = minDistance > 30;
-  if (isOffRoute) {
-    console.log(`⚠️ Driver is ${minDistance.toFixed(0)}m off route`);
-  }
-  return isOffRoute;
-};
-
-// Check if driver has moved toward pickup within 90 seconds
-const checkMovementTowardPickup = () => {
-  if (!acceptanceLocationRef.current || !driverLocation || !ride.pickup) {
-    return;
-  }
-  
-  const initialDistanceToPickup = haversineDistance(
-    acceptanceLocationRef.current.latitude,
-    acceptanceLocationRef.current.longitude,
-    ride.pickup.lat,
-    ride.pickup.lng
-  );
-  
-  const currentDistanceToPickup = haversineDistance(
-    driverLocation.latitude,
-    driverLocation.longitude,
-    ride.pickup.lat,
-    ride.pickup.lng
-  );
-  
-  // Check if driver has moved at least 50 meters closer to pickup
-  const hasMovedTowardPickup = (initialDistanceToPickup - currentDistanceToPickup) > 50;
-  
-  console.log(`📍 Movement check - Initial: ${initialDistanceToPickup.toFixed(0)}m, Current: ${currentDistanceToPickup.toFixed(0)}m, Moved toward: ${hasMovedTowardPickup}`);
-  
-  if (!hasMovedTowardPickup) {
-    // Show prompt
-    setShowMovementPrompt(true);
-    
-    // Auto-dismiss after 10 seconds
-    promptDismissTimerRef.current = setTimeout(() => {
-      setShowMovementPrompt(false);
-    }, 10000);
-  }
-};
-
-// ==================== REAL-TIME ROUTE REFRESH ====================
-const refreshRouteFromGoogle = async (location: Location) => {
-  // Don't refresh if not in active navigation
-  if (ride.status !== 'en_route_to_pickup' && ride.status !== 'in_trip') return;
-  
-  try {
-    const token = await apiService.getToken();
-    if (!token) return;
-
-    // Determine target based on ride status
-    const target = ride.status === 'en_route_to_pickup'
-      ? { lat: ride.pickup.lat, lng: ride.pickup.lng }
-      : { lat: ride.destination.lat, lng: ride.destination.lng };
-
-    const response = await fetch(`${API_BASE_URL}/api/routes/calculate`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        driverLocation: {
-          lat: location.latitude,
-          lng: location.longitude,
-        },
-        pickup: { lat: ride.pickup.lat, lng: ride.pickup.lng },
-        destination: { lat: ride.destination.lat, lng: ride.destination.lng },
-        refreshRoute: true,
-        rideStatus: ride.status,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (data.success) {
-      const routeData = ride.status === 'en_route_to_pickup'
-        ? data.toPickup
-        : data.toDestination;
-
-      // Update polyline
-      if (routeData?.polyline) {
-        const coords = decodePolyline(routeData.polyline);
-        setRouteCoordinates(coords);
-      }
-
-      // Update navigation steps
-      if (routeData?.steps && routeData.steps.length > 0) {
-        const steps = routeData.steps.map((step: any) => ({
-          instruction: step.instruction || '',
-          distance: step.distance?.text || '',
-          duration: step.duration?.text || '',
-          maneuver: step.maneuver || '',
-          endLocation: step.end_location ? {
-            lat: step.end_location.lat,
-            lng: step.end_location.lng,
-          } : undefined,
-        }));
-        setNavigationSteps(steps);
-        navigationStepsRef.current = steps;
         
-        // Update ETA and distance from Google's response
-        if (routeData.duration?.text) {
-          setEta(routeData.duration.text);
-        }
-        if (routeData.distance?.text) {
-          setTotalDistance(routeData.distance.text);
-        }
-      }
+        // Reset to HomeScreen
+        // Hide NavigationView first to force unmount
+          setShowNavView(false);
+
+        // Wait for unmount before navigating
+           setTimeout(() => {
+           navigation.dispatch(
+            CommonActions.reset({
+            index: 0,
+            routes: [{ name: 'Home' }],
+          })
+        );
+      }, 500); // 500ms delay for SDK cleanup
     }
   } catch (error) {
-    console.error('Route refresh failed:', error);
-  }
-};
-
-
-
-
-const triggerReroute = async (location: Location) => {
-  // Prevent multiple reroutes within 2 seconds
-  const now = Date.now();
-  if (now - lastRerouteTimeRef.current < 2000) return;
-  if (isReroutingRef.current) return;
-  
-  console.log('🔄 Rerouting from current position...');
-  isReroutingRef.current = true;
-  lastRerouteTimeRef.current = now;
-  
-  try {
-    // Determine target based on ride status
-    const target = ride.status === 'en_route_to_pickup' 
-      ? { lat: ride.pickup.lat, lng: ride.pickup.lng }
-      : { lat: ride.destination.lat, lng: ride.destination.lng };
-    
-    const token = await apiService.getToken();
-    if (!token) {
-      console.error('No auth token for reroute');
-      return;
-    }
-    
-    const response = await fetch(`${API_BASE_URL}/api/routes/calculate`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        driverLocation: {
-          lat: location.latitude,
-          lng: location.longitude,
-           heading: location.heading,
-        },
-        pickup: target,
-        destination: ride.status === 'en_route_to_pickup' 
-          ? { lat: ride.destination.lat, lng: ride.destination.lng }
-          : target,
-        refreshRoute: true,
-      }),
-    });
-    
-    const data = await response.json();
-    
-    if (data.toPickup?.polyline || data.toDestination?.polyline) {
-      const routeData = ride.status === 'en_route_to_pickup' 
-        ? data.toPickup 
-        : data.toDestination;
-      
-      if (routeData?.polyline) {
-        const coords = decodePolyline(routeData.polyline);
-        setRouteCoordinates(coords);
-      }
-      
-      if (routeData?.steps) {
-        const steps = routeData.steps.map((step: any) => ({
-          instruction: step.instruction || '',
-          distance: step.distance?.text || '',
-          duration: step.duration?.text || '',
-          maneuver: step.maneuver || '',
-          endLocation: step.end_location ? {
-            lat: step.end_location.lat,
-            lng: step.end_location.lng,
-          } : undefined,
-        }));
-        setNavigationSteps(steps);
-        navigationStepsRef.current = steps;
-        currentStepIndexRef.current = 0;
-        setCurrentStepIndex(0);
-      }
-      
-      console.log('✅ Reroute complete');
-    }
-  } catch (error) {
-    console.error('❌ Reroute failed:', error);
+    console.error('❌ [WithSDK] Status change failed:', error);
+    Alert.alert('Error', 'Failed to update ride status');
   } finally {
-    isReroutingRef.current = false;
+    setIsLoading(false);
   }
 };
 
-  // ==================== GEOFENCE DETECTION ====================
-
-  const checkGeofence = (location: Location) => {
-    // Use ref to get current ride state (avoids stale closure)
-    const currentRide = rideRef.current;
-    
-    console.log(`📍 checkGeofence - status: ${currentRide.status}, target: ${currentRide.status === 'in_trip' ? 'destination' : 'pickup'}`);
-
-    const target = currentRide.status === 'en_route_to_pickup'
-      ? currentRide.pickup
-      : currentRide.status === 'in_trip'
-        ? currentRide.destination
-        : null;
-
-    if (!target) {
-      setIsWithinGeofence(false);
-      return;
-    }
-
-    const distanceMeters = haversineDistance(
-      location.latitude,
-      location.longitude,
-      target.lat,
-      target.lng
-    );
-
-    console.log(`📍 Geofence distance: ${distanceMeters.toFixed(0)}m (threshold: ${marketSettings.arrivalRadiusMeters}m)`);
-
-    setDistanceToTargetMeters(distanceMeters);
-
-    const withinGeofence = distanceMeters <= marketSettings.arrivalRadiusMeters;
-    setIsWithinGeofence(withinGeofence);
-
-    // Auto-trigger arrival if within geofence
-    if (withinGeofence && !hasAutoTriggeredArrival.current) {
-      hasAutoTriggeredArrival.current = true;
-
-      if (currentRide.status === 'en_route_to_pickup') {
-        console.log('🎯 Auto-triggering arrival at pickup');
-        handleArrivedAtPickup();
-      } else if (currentRide.status === 'in_trip') {
-        console.log('🎯 Auto-triggering arrival at destination');
-        handleArrivedAtDestination();
-      }
-    }
-
-    // Reset auto-trigger if we leave geofence
-    if (!withinGeofence && hasAutoTriggeredArrival.current) {
-      hasAutoTriggeredArrival.current = false;
-    }
-  };
-
-  // ==================== MARKET SETTINGS ====================
-
-  const fetchMarketSettings = async () => {
-    try {
-      const token = await apiService.getToken();
-      if (!token) return;
-
-      const response = await fetch(
-        `${API_BASE_URL}/api/settings/for-location?lat=${ride.pickup.lat}&lng=${ride.pickup.lng}`,
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      );
-
-      const data = await response.json();
-      if (data.gracePeriodSeconds) {
-        console.log('📍 Market settings loaded:', data);
-        setMarketSettings({
-          gracePeriodSeconds: data.gracePeriodSeconds,
-          waitRatePerMinute: data.waitRatePerMinute || 0.50,
-          arrivalRadiusMeters: data.arrivalRadiusMeters || 100,
-        });
-      }
-    } catch (error) {
-      console.log('Using default market settings');
-    }
-  };
-
-  // ==================== STATUS TRANSITIONS ====================
-
-  const handleArrivedAtPickup = async () => {
-    if (ride.status !== 'en_route_to_pickup') return;
-
-    console.log('📍 Arrived at pickup');
-
-    setRide(prev => ({
-      ...prev,
-      status: 'at_pickup',
-      arrivedAt: new Date().toISOString(),
-    }));
-
-    setWaitStartTime(new Date());
-
-    // Notify via socket
-    socketService.updateTripStatus(ride.rideId, 'pickup');
-  };
-
-  const handleStartTrip = async () => {
-    if (ride.status !== 'at_pickup') return;
-
-    console.log('▶️ Starting trip');
-    setIsLoading(true);
-
-    try {
-      // Reset geofence tracking for destination
-      hasAutoTriggeredArrival.current = false;
-      setIsWithinGeofence(false);
-
-      setRide(prev => ({
-        ...prev,
-        status: 'in_trip',
-        startedAt: new Date().toISOString(),
-      }));
-
-      console.log('▶️ Starting trip');
-       setWaitStartTime(null);  // Kill wait timer immediately
-       setIsLoading(true);
-
-      // Notify via socket
-      socketService.updateTripStatus(ride.rideId, 'enroute');
-
-      // Use stored route data for destination (avoid API call)
-if (routeData?.toDestination) {
+// *** SLIDER HANDLER ***
+const handleSlideComplete = async () => {
+  if (sliderPosition < 80) {
+    // Reset if not slid far enough
+    setSliderPosition(0);
+    return;
+  }
+  
+  setIsSliding(false);
+  setIsLoading(true);
+  
   try {
-    const destRoute = routeData.toDestination;
+    // Update status to in_trip
+    await apiService.put(`/rides/${ride.rideId}/status`, { status: 'in_trip' });
+    setRide(prev => ({ ...prev, status: 'in_trip' }));
     
-    if (destRoute.polyline) {
-      const decoded = decodePolyline(destRoute.polyline);
-      setRouteCoordinates(decoded);
-    }
-    
-    if (destRoute.steps) {
-      const steps = destRoute.steps.map((step: any) => ({
-      instruction: step.instruction || '',
-      distance: step.distance?.text || '',
-      duration: step.duration?.text || '',
-      maneuver: step.maneuver || 'straight',
-      endLocation: step.end_location ? {
-       lat: step.end_location.lat,
-       lng: step.end_location.lng,
-       } : undefined,
-       }));
-      setNavigationSteps(steps);
-      setCurrentStepIndex(0);
-    }
-    
-    const mins = destRoute.duration?.adjusted_minutes || 0;
-    const miles = destRoute.distance?.miles || 0;
-    setEta(`${mins} min`);
-    setTotalDistance(`${miles.toFixed(1)} mi`);
-  } catch (err) {
-    console.log('⚠️ Error using stored route data:', err);
-  }
-}
-}
-     finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleArrivedAtDestination = async () => {
-  if (ride.status !== 'in_trip') return;
-
-  console.log('🏁 Arrived at destination');
-
-  // Notify via socket
-  socketService.updateTripStatus(ride.rideId, 'completed');
-
-  // Navigate to Home with trip summary data
-  navigation.reset({
-    index: 0,
-    routes: [{
-      name: 'Home',
-      params: {
-        completedTrip: {
-          rideId: ride.rideId,
-          fare: ride.fare.estimated,
-          distance: ride.distance.toDestination?.miles || 0,
-          riderName: ride.rider.name,
-          completedAt: new Date().toISOString(),
+    // Set new destination for navigation
+    if (navigationController && navigationInitialized.current && ride?.destination) {
+      await navigationController.setDestinations([{
+        title: 'Dropoff',
+        position: {
+          lat: ride.destination.lat,
+          lng: ride.destination.lng,
         },
-      stayOnline: true,
-},
-    }],
-  });
-};
-
-
-  const handleCompleteTrip = async () => {
-    console.log('✅ Trip completed, returning home');
-
-    navigation.reset({
-    index: 0,
-    routes: [{ name: 'Home', params: { stayOnline: true } }],
-  });
-   };
-
-  // ==================== ACTION HANDLERS ====================
-
-  const handlePrimaryAction = () => {
-    switch (ride.status) {
-      case 'en_route_to_pickup':
-        if (isWithinGeofence) {
-          handleArrivedAtPickup();
-        }
-        break;
-      case 'at_pickup':
-        handleStartTrip();
-        break;
-      case 'in_trip':
-        handleArrivedAtDestination();
-        break;
-      case 'completed':
-        handleCompleteTrip();
-        break;
+      }]);
+      await navigationController.startGuidance();
+      console.log('🔷 [WithSDK] Navigation to dropoff started!');
     }
-  };
+    
+    setPanelExpanded(false);
+    setSliderPosition(0);
+  } catch (error) {
+    console.error('❌ Failed to start trip:', error);
+    Alert.alert('Error', 'Failed to start trip');
+    setSliderPosition(0);
+  } finally {
+    setIsLoading(false);
+  }
+};
+// *** SLIDER PAN RESPONDER ***
+const sliderWidth = 280;
+const thumbWidth = 60;
+const maxSlide = sliderWidth - thumbWidth;
+
+const panResponder = useRef(
+  PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      setIsSliding(true);
+    },
+    onPanResponderMove: (_, gestureState) => {
+      const newX = Math.max(0, Math.min(gestureState.dx, maxSlide));
+      sliderX.setValue(newX);
+      setSliderPosition((newX / maxSlide) * 100);
+    },
+    onPanResponderRelease: () => {
+      if (sliderPosition >= 80) {
+        // Complete the slide
+        Animated.spring(sliderX, {
+          toValue: maxSlide,
+          useNativeDriver: false,
+        }).start(() => {
+          handleSlideComplete();
+        });
+      } else {
+        // Reset slider
+        Animated.spring(sliderX, {
+          toValue: 0,
+          useNativeDriver: false,
+        }).start();
+        setSliderPosition(0);
+      }
+      setIsSliding(false);
+    },
+  })
+).current;
 
   const handleCallRider = () => {
-    if (ride.rider.phone) {
+    if (ride?.rider?.phone) {
       Linking.openURL(`tel:${ride.rider.phone}`);
     } else {
       Alert.alert('Unable to Call', 'Rider phone number not available');
     }
   };
 
-  const handleMessageRider = () => {
-    Alert.alert('Message', 'In-app chat coming soon!');
-  };
-
-  const handleCancelRide = () => {
-    Alert.alert(
-      'Cancel Ride',
-      'Are you sure you want to cancel? This may affect your rating.',
-      [
-        { text: 'Keep Ride', style: 'cancel' },
-        {
-          text: 'Cancel Ride',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const token = await apiService.getToken();
-              await fetch(`${API_BASE_URL}/api/rides/${ride.rideId}/cancel`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  cancelledBy: 'driver',
-                  reason: 'Driver cancelled',
-                }),
-              });
-
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Home', params: { stayOnline: true } }],
-              });
-            } catch (error) {
-              console.error('Cancel error:', error);
-              Alert.alert('Error', 'Failed to cancel ride');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleBackPress = () => {
-    if (isTripActive(ride.status)) {
-      Alert.alert(
-        'Active Ride',
-        'You have an active ride. Do you want to cancel it?',
-        [
-          { text: 'Continue Ride', style: 'cancel' },
-          { text: 'Cancel Ride', style: 'destructive', onPress: handleCancelRide },
-        ]
-      );
-    } else {
-      navigation.goBack();
+  const handleNavigateExternal = () => {
+    const dest = ride?.status === 'en_route_to_pickup' ? ride?.pickup : ride?.destination;
+    if (dest) {
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lng}`;
+      Linking.openURL(url);
     }
   };
 
-  // ==================== COMPUTED VALUES ====================
+  const getActionButtonConfig = () => {
+    switch (ride?.status) {
+      case 'en_route_to_pickup':
+        return null; // No button - auto-arrival detection
+      case 'at_pickup':
+        return null; // Slider handles this
+      case 'in_trip':
+        return { label: 'Complete Trip', nextStatus: 'completed' as TripStatus, color: '#8B5CF6' };
+      default:
+        return null;
+    }
+  };
+  const actionConfig = getActionButtonConfig();
 
-  const distanceToTargetMiles = distanceToTargetMeters 
-    ? distanceToTargetMeters / 1609.34 
-    : undefined;
-
-  const etaMinutes = eta 
-    ? parseInt(eta.replace(/\D/g, '')) || undefined 
-    : undefined;
-
-  const showNavigationBar = ride.status === 'en_route_to_pickup' || ride.status === 'in_trip';
-  const showWaitTimer = ride.status === 'at_pickup' && waitStartTime !== null;
-  const showCancelButton = ride.status === 'en_route_to_pickup' || ride.status === 'at_pickup';
-
-  // ==================== RENDER ====================
-
-  
-    return (
+  // *** RENDER ***
+return (
     <View style={styles.container}>
-      {/* Movement Prompt */}
-      {showMovementPrompt && (
-        <View style={styles.movementPromptContainer}>
-          <View style={styles.movementPrompt}>
-            <Text style={styles.movementPromptText}>
-              Are you going to pickup your rider?
-            </Text>
+      {/* Navigation Map - Full Screen */}
+      {NavigationView && showNavView && (
+        <NavigationView
+          style={styles.navMap}
+          onNavigationViewControllerCreated={(controller: any) => {
+            console.log('🗺️ NavigationViewController created');
+            setNavViewController(controller);
+            // Enable speedometer and speed limit icon
+            controller.setSpeedometerEnabled(true);
+            controller.setSpeedLimitIconEnabled(true);
+          }}
+          onMapViewControllerCreated={(controller: any) => {
+            console.log('🗺️ MapViewController created');
+            setMapViewController(controller);
+            // Hide blue dot - we'll show car marker instead
+            controller.setMyLocationEnabled(false);
+          }}
+        />
+      )}
+
+
+      
+      {/* Loading Overlay */}
+      {isPreparingNav && (
+        <View style={styles.prepOverlay}>
+          <Text style={styles.prepText}>Preparing navigation...</Text>
+          <View style={styles.progressBarBg}>
+            <View style={[styles.progressBarFill, { width: `${prepProgress}%` }]} />
           </View>
+          <Text style={styles.prepSubtext}>
+            Locating pickup: {ride?.pickup?.address}
+          </Text>
         </View>
       )}
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Map with route */}
-      <RouteMapView
-        ref={mapRef}
-        driverLocation={driverLocation}
-        heading={heading}
-        pickup={ride.pickup}
-        destination={ride.destination}
-        routeCoordinates={routeCoordinates}
-        tripStatus={ride.status}
-        riderName={ride.rider.name}
-      />
+      {/* Bottom Card Overlay */}
+      <TouchableOpacity 
+        style={[styles.bottomOverlay, !panelExpanded && styles.bottomOverlayCollapsed]}
+        onPress={() => setPanelExpanded(!panelExpanded)}
+        activeOpacity={0.9}
+      >
+        {/* Collapsed View */}
+        {!panelExpanded ? (
+          <View style={styles.collapsedContent}>
+            <View style={styles.dragHandle} />
+            <Text style={styles.pickingUpText}>
+              Picking up {ride?.rider?.name || 'Rider'}
+            </Text>
+            <Text style={styles.pickupAddress} numberOfLines={1}>
+              {ride?.pickup?.address}
+            </Text>
+          </View>
+        ) : (
+          <>
+            {/* Expanded View */}
+            <View style={styles.dragHandle} />
+            
+            {/* Rider Info */}
+            <View style={styles.riderRow}>
+              <View>
+                <Text style={styles.riderName}>{ride?.rider?.name || 'Rider'}</Text>
+                <Text style={styles.riderRating}>⭐ {ride?.rider?.rating?.toFixed(1) || 'N/A'}</Text>
+              </View>
+              <TouchableOpacity style={styles.callButton} onPress={handleCallRider}>
+                <Text style={styles.callButtonText}>📞</Text>
+              </TouchableOpacity>
+            </View>
 
-      {/* Navigation bar (turn-by-turn) */}
-      {showNavigationBar && (
-      <NavigationBar
-     currentStep={navigationSteps[currentStepIndex + 1] || { 
-     instruction: 'Arrive at destination', 
-     maneuver: 'arrive',
-     distance: nextActionDistance,
-     duration: nextActionEta
-     }}
-     nextStep={navigationSteps[currentStepIndex + 2] || null}
-     eta={nextActionEta}
-     totalDistance={nextActionDistance}
-     isCalculating={isCalculatingRoute}
-/>
-      )}
-
-      {/* Bottom panel */}
-<View style={styles.bottomPanel}>
-  {/* Status row - show during en_route_to_pickup */}
-    {ride.status === 'en_route_to_pickup' && (
-    <>
-      <TouchableOpacity onPress={() => setBottomCardExpanded(!bottomCardExpanded)}>
-        <StatusRow
-          riderName={ride.rider.name}
-          address={ride.pickup.address}
-          tripStatus={ride.status}
-          distance={totalDistance}
-          eta={eta}
-        />
-      </TouchableOpacity>
-      {bottomCardExpanded && (
-        <>
-          <View style={styles.riderInfoRow}>
-            <View style={styles.riderAvatar}>
-              <Text style={styles.riderInitials}>
-                {ride.rider.name.split(' ').map(n => n[0]).join('')}
+            {/* Destination */}
+            <View style={styles.destinationRow}>
+              <Text style={styles.destinationLabel}>
+                {ride?.status === 'en_route_to_pickup' ? 'PICKUP' : 'DROPOFF'}
+              </Text>
+              <Text style={styles.destinationAddress} numberOfLines={2}>
+                {ride?.status === 'en_route_to_pickup'
+                  ? ride?.pickup?.address
+                  : ride?.destination?.address}
               </Text>
             </View>
-            <View style={styles.riderDetails}>
-              <Text style={styles.riderName}>{ride.rider.name}</Text>
-              <Text style={styles.riderRating}>{'★'.repeat(Math.round(ride.rider.rating || 4.5))} {ride.rider.rating || 4.5}</Text>
-            </View>
-            <TouchableOpacity style={styles.actionButton} onPress={handleMessageRider}>
-              <Text style={styles.actionButtonIcon}>💬</Text>
+             {/* Wait Timer - only show at pickup */}
+            {ride?.status === 'at_pickup' && waitSeconds !== null && (
+              <View style={styles.waitTimerRow}>
+                <Text style={styles.waitTimerLabel}>
+                  {waitSeconds > 0 ? 'Grace Period' : 'Wait Time'}
+                </Text>
+                <Text style={[
+                  styles.waitTimerValue,
+                  { color: waitSeconds > 0 ? '#EF4444' : '#10B981' }
+                ]}>
+                  {waitSeconds > 0 
+                    ? `${Math.floor(waitSeconds / 60)}:${(waitSeconds % 60).toString().padStart(2, '0')}`
+                    : `+${Math.floor(Math.abs(waitSeconds) / 60)}:${(Math.abs(waitSeconds) % 60).toString().padStart(2, '0')}`
+                  }
+                </Text>
+              </View>
+            )}
+           {/* Slider for at_pickup, regular button for other statuses */}
+            {ride?.status === 'at_pickup' ? (
+              <View style={styles.sliderContainer}>
+                <View style={styles.sliderTrack}>
+                  <Text style={styles.sliderHintText}>
+                    {sliderPosition >= 80 ? 'Release to Start!' : 'Slide to Start Trip →'}
+                  </Text>
+                  <Animated.View
+                    style={[
+                      styles.sliderThumb,
+                      { transform: [{ translateX: sliderX }] }
+                    ]}
+                    {...panResponder.panHandlers}
+                  >
+                    <Text style={styles.sliderThumbText}>→</Text>
+                  </Animated.View>
+                </View>
+              </View>
+            ) : (
+              actionConfig && (
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: actionConfig.color }]}
+                  onPress={() => handleStatusChange(actionConfig.nextStatus)}
+                  disabled={isLoading}
+                >
+                  <Text style={styles.actionButtonText}>
+                    {isLoading ? 'Updating...' : actionConfig.label}
+                  </Text>
+                </TouchableOpacity>
+              )
+            )}
+
+            {/* Cancel Button */}
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => handleStatusChange('cancelled')}
+              disabled={isLoading}
+            >
+              <Text style={styles.cancelButtonText}>Cancel Ride</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={handleCallRider}>
-              <Text style={styles.actionButtonIcon}>📞</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={handleCancelRide}
-          >
-            <Text style={styles.cancelButtonText}>Cancel Ride</Text>
-          </TouchableOpacity>
-        </>
-      )}
-    </>
-  )}
-
-  {/* Full UI - only at pickup */}
-  {ride.status === 'at_pickup' && (
-    <>
-      <RiderCard
-        rider={ride.rider}
-        pickup={ride.pickup}
-        destination={ride.destination}
-        tripStatus={ride.status}
-        distanceToTarget={distanceToTargetMiles}
-        etaToTarget={etaMinutes}
-        onCall={handleCallRider}
-        onMessage={handleMessageRider}
-        onCancel={handleCancelRide}
-        showCancelButton={false}
-      />
-
-      {showWaitTimer && (
-        <WaitTimer
-          startTime={waitStartTime}
-          gracePeriodSeconds={marketSettings.gracePeriodSeconds}
-          waitRatePerMinute={marketSettings.waitRatePerMinute}
-        />
-      )}
-
-      <TripActionButton
-        tripStatus={ride.status}
-        isWithinGeofence={isWithinGeofence}
-        onPress={handlePrimaryAction}
-        loading={isLoading}
-        eta={eta}
-        distanceToTarget={totalDistance}
-      />
-    </>
-  )}
-
-    {/* Minimal bar during trip */}
-  {ride.status === 'in_trip' && (
-    <>
-      <TouchableOpacity onPress={() => setBottomCardExpanded(!bottomCardExpanded)}>
-        <View style={styles.minimalTripBar}>
-          <Text style={styles.minimalTripTime}>{eta}</Text>
-          <Text style={styles.minimalTripText}>Dropping off {ride.rider.name}</Text>
-          <Text style={styles.minimalTripDistance}>{totalDistance}</Text>
-        </View>
+          </>
+        )}
       </TouchableOpacity>
-      {(bottomCardExpanded || isWithinGeofence) && (
-        <View style={styles.completeTripContainer}>
-          <TouchableOpacity
-            style={styles.completeTripButton}
-            onPress={handlePrimaryAction}
-            disabled={isLoading}
-          >
-            <Text style={styles.completeTripButtonText}>
-              {isLoading ? 'Completing...' : 'Complete Trip'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </>
-  )}
-</View>
     </View>
   );
 };
 
+// ============================================================================
+// FALLBACK MODE COMPONENT (No SDK)
+// ============================================================================
+const ActiveRideFallback = (props: any) => {
+  console.log('🟡 [Fallback] Component rendering...');
+  
+  const navigation = useNavigation<ActiveRideScreenNavigationProp>();
+  const route = useRoute<ActiveRideScreenRouteProp>();
+  
+  // Extract ride from params
+  const params = route.params as any;
+  const initialRide: ActiveRide = params?.ride ?? params;
+  
+  const [ride, setRide] = useState<ActiveRide>(initialRide);
+  const [isLoading, setIsLoading] = useState(false);
+  const [panelExpanded, setPanelExpanded] = useState(false);
+
+  const handleStatusChange = async (newStatus: TripStatus) => {
+    setIsLoading(true);
+    try {
+      await apiService.put(`/rides/${ride.rideId}/status`, { status: newStatus });
+      setRide(prev => ({ ...prev, status: newStatus }));
+      
+      if (newStatus === 'completed' || newStatus === 'cancelled') {
+        navigation.goBack();
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update ride status');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getActionButtonConfig = () => {
+    switch (ride?.status) {
+      case 'en_route_to_pickup':
+        return { label: "I've Arrived", nextStatus: 'arrived' as TripStatus, color: '#3B82F6' };
+      case 'at_pickup':
+        return { label: 'Start Trip', nextStatus: 'in_trip' as TripStatus, color: '#10B981' };
+      case 'in_trip':
+        return { label: 'Complete Trip', nextStatus: 'completed' as TripStatus, color: '#8B5CF6' };
+      default:
+        return null;
+    }
+  };
+  
+  const actionConfig = getActionButtonConfig();
+
+  return (
+    <View style={styles.container}>
+      <View style={[styles.debugBanner, { backgroundColor: '#F59E0B' }]}>
+        <Text style={styles.debugText}>🟡 FALLBACK MODE</Text>
+        <Text style={styles.debugSubtext}>Google Navigation SDK not available</Text>
+      </View>
+
+      <ScrollView style={styles.scrollContent}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Ride Details</Text>
+          <View style={styles.infoRow}>
+            <Text style={styles.label}>Ride ID:</Text>
+            <Text style={styles.value}>{ride?.rideId || 'Unknown'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.label}>Status:</Text>
+            <Text style={[styles.value, styles.statusBadge]}>{ride?.status || 'Unknown'}</Text>
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Rider</Text>
+          <Text style={styles.value}>{ride?.rider?.name || 'Unknown'}</Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Destination</Text>
+          <Text style={styles.address}>{ride?.destination?.address || 'Unknown'}</Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Fare</Text>
+          <Text style={styles.fareAmount}>${ride?.fare?.estimated?.toFixed(2) || '0.00'}</Text>
+        </View>
+      </ScrollView>
+
+      <View style={styles.actionContainer}>
+        {actionConfig && (
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: actionConfig.color }]}
+            onPress={() => handleStatusChange(actionConfig.nextStatus)}
+            disabled={isLoading}
+          >
+            <Text style={styles.actionButtonText}>
+              {isLoading ? 'Updating...' : actionConfig.label}
+            </Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={styles.cancelButton}
+          onPress={() => handleStatusChange('cancelled')}
+          disabled={isLoading}
+        >
+          <Text style={styles.cancelButtonText}>Cancel Ride</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+// ============================================================================
+// STYLES
+// ============================================================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0F172A',
   },
-  bottomPanel: {
+  debugBanner: {
+    backgroundColor: '#3B82F6',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 50,
+  },
+  debugText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  debugSubtext: {
+    color: '#fff',
+    fontSize: 12,
+    opacity: 0.8,
+    marginTop: 4,
+  },
+  scrollContent: {
+    flex: 1,
+    padding: 16,
+  },
+  card: {
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  cardTitle: {
+    color: '#94A3B8',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  label: {
+    color: '#64748B',
+    fontSize: 14,
+  },
+  value: {
+    color: '#F1F5F9',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  statusBadge: {
+    backgroundColor: '#3B82F6',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+    fontSize: 14,
+  },
+  address: {
+    color: '#F1F5F9',
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  fareAmount: {
+    color: '#10B981',
+    fontSize: 32,
+    fontWeight: 'bold',
+  },
+  surgeText: {
+    color: '#F59E0B',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  secondaryButton: {
+    backgroundColor: '#334155',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: '#F1F5F9',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  actionContainer: {
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+    backgroundColor: '#1E293B',
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  actionButton: {
+    paddingVertical: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  cancelButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  cancelButtonText: {
+    color: '#EF4444',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  cancelButtonCollapsed: {
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+
+  navMap: {
+    flex: 1,
+  },
+  bottomOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    backgroundColor: '#1E293B',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
     paddingBottom: Platform.OS === 'ios' ? 34 : 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 8,
   },
-  completeTripButton: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  completeTripButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  completeTripContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  cancelButton: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  cancelButtonText: {
-    color: '#DC2626',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  minimalTripBar: {
+
+  waitTimerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#0F172A',
+    borderRadius: 8,
   },
-  minimalTripTime: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#10B981',
+  waitTimerLabel: {
+    color: '#94A3B8',
+    fontSize: 14,
   },
-  minimalTripText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-    textAlign: 'center',
+  waitTimerValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    fontVariant: ['tabular-nums'],
   },
-  minimalTripDistance: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  riderInfoRow: {
+  riderRow: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  riderAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  riderInitials: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  riderDetails: {
-    flex: 1,
-    marginLeft: 12,
+    marginBottom: 16,
   },
   riderName: {
-    fontSize: 16,
+    color: '#F1F5F9',
+    fontSize: 18,
     fontWeight: '600',
-    color: '#1F2937',
   },
   riderRating: {
+    color: '#94A3B8',
     fontSize: 14,
-    color: '#6B7280',
+    marginTop: 2,
   },
-  actionButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#F3F4F6',
+  callButton: {
+    backgroundColor: '#3B82F6',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
   },
-  actionButtonIcon: {
-    fontSize: 20,
+  callButtonText: {
+    fontSize: 24,
   },
-  // Movement Prompt Styles
-  movementPromptContainer: {
-    position: 'absolute',
-    top: 100,
-    left: 20,
-    right: 20,
-    zIndex: 1000,
+  destinationRow: {
+    marginBottom: 16,
+  },
+  destinationLabel: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  destinationAddress: {
+    color: '#F1F5F9',
+    fontSize: 16,
+  },
+  fareRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  fareLabel: {
+    color: '#94A3B8',
+    fontSize: 14,
+  },
+ bottomOverlayCollapsed: {
+    paddingVertical: 12,
+  },
+  collapsedContent: {
     alignItems: 'center',
   },
-  movementPrompt: {
-    backgroundColor: '#FEF3C7',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#F59E0B',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+  dragHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#64748B',
+    borderRadius: 2,
+    marginBottom: 12,
+    alignSelf: 'center',
   },
-  movementPromptText: {
-    color: '#92400E',
+  pickingUpText: {
+    color: '#F1F5F9',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  pickupAddress: {
+    color: '#94A3B8',
+    fontSize: 14,
+  },
+  prepOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  prepText: {
+    color: '#F1F5F9',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 24,
+  },
+  progressBarBg: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#334155',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#3B82F6',
+    borderRadius: 4,
+  },
+  prepSubtext: {
+    color: '#94A3B8',
+    fontSize: 14,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  sliderContainer: {
+    marginVertical: 16,
+  },
+  sliderTrack: {
+    width: 280,
+    height: 60,
+    backgroundColor: '#10B981',
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignSelf: 'center',
+    overflow: 'hidden',
+  },
+  sliderHintText: {
+    color: 'rgba(255,255,255,0.7)',
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  sliderThumb: {
+    position: 'absolute',
+    left: 4,
+    width: 52,
+    height: 52,
+    backgroundColor: '#fff',
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  sliderThumbText: {
+    fontSize: 24,
+    color: '#10B981',
+    fontWeight: 'bold',
   },
 });
 
-
 export default ActiveRideScreen;
+
