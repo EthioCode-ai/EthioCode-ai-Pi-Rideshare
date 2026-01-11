@@ -241,16 +241,13 @@ const ActiveRideScreen = () => {
 
   const confirmCancelRide = async () => {
     setCancelling(true);
-    
+
     try {
-      // TODO: Call API to cancel ride
-      // await rideService.cancelRide(rideId);
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Cancel ride via socket
+      socketService.cancelRide(rideId, 'Rider cancelled');
       
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      
+
       Alert.alert(
         'Ride Cancelled',
         'Your ride has been cancelled.',
@@ -656,7 +653,7 @@ const ActiveRideScreen = () => {
             </Text>
             <View style={styles.ratingRow}>
               <Text style={styles.ratingStar}>★</Text>
-              <Text style={styles.ratingText}>{driver.rating.toFixed(2)}</Text>
+              <Text style={styles.ratingText}>{Number(driver?.rating || 5.0).toFixed(2)}</Text> 
             </View>
           </View>
           <View style={styles.etaContainer}>

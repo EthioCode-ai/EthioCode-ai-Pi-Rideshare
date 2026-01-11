@@ -372,15 +372,23 @@ class SocketService {
   }
 
   /**
-   * Acknowledge ride cancellation
-   * Server listens: ride-cancelled-ack (line 7501)
-   */
-  acknowledgeCancellation(rideId: string) {
-    this.socket?.emit('ride-cancelled-ack', { 
-      rideId: rideId,
-      riderId: this.userId
-    });
-  }
+     * Cancel ride (by rider)
+     * Server listens: rider-cancel-ride
+     */
+    cancelRide(rideId: string, reason?: string) {
+      if (!this.socket) {
+        console.error('❌ Socket not connected - cannot cancel ride');
+        return;
+      }
+      console.log('🚫 [RIDER] Cancelling ride:', rideId);
+      this.socket.emit('rider-cancel-ride', {
+        riderId: this.userId,
+        rideId: rideId,
+        reason: reason || 'Rider cancelled',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
 
   /**
    * Request current ride state (reconnection)
