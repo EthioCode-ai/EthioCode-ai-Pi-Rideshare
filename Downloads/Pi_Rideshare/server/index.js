@@ -2780,7 +2780,11 @@ app.put('/api/rides/:rideId/accept', authenticateToken, (req, res) => {
     ride.acceptedAt = new Date();
 
     // Notify rider
-    io.emit('ride-accepted', ride);
+    io.to(`user-${ride.rider_id}`).emit('ride-accepted', {
+     rideId: ride.id,
+     ride: ride,
+     driver: ride.driver
+    });
 
     res.json({
       message: 'Ride accepted successfully',
@@ -5821,10 +5825,19 @@ app.post('/api/debug/surge', async (req, res) => {
   }
 });
 
-// Fare estimate endpoint
+// Fare estimate endpoint - returns estimates for ALL vehicle types
 app.post('/api/rides/estimate', async (req, res) => {
   try {
-    const { pickup, destination, rideType } = req.body;
+    // Support both formats: {pickup_lat, pickup_lng} and {pickup: {lat, lng}}
+    let pickup, destination;
+    
+    if (req.body.pickup_lat !== undefined) {
+      pickup = { lat: req.body.pickup_lat, lng: req.body.pickup_lng };
+      destination = { lat: req.body.destination_lat, lng: req.body.destination_lng };
+    } else {
+      pickup = req.body.pickup;
+      destination = req.body.destination;
+    }
 
     if (!pickup || !destination || !pickup.lat || !pickup.lng || !destination.lat || !destination.lng) {
       return res.status(400).json({
@@ -5833,23 +5846,32 @@ app.post('/api/rides/estimate', async (req, res) => {
       });
     }
 
-    const fareEstimate = await calculateFare(pickup, destination, rideType || 'standard');
+    // Calculate estimates for ALL vehicle types
+    const vehicleTypes = ['economy', 'standard', 'xl', 'premium'];
+    const estimates = await Promise.all(
+      vehicleTypes.map(async (vehicleType) => {
+        const fareData = await calculateFare(pickup, destination, vehicleType);
+        return {
+          vehicleType,
+          baseFare: fareData.baseFare,
+          distanceFare: fareData.distanceFare,
+          timeFare: fareData.timeFare,
+          totalFare: fareData.totalFare,
+          surgeMultiplier: fareData.surgeMultiplier || 1,
+          estimatedMinutes: fareData.estimatedMinutes,
+          distanceMiles: fareData.distanceMiles
+        };
+      })
+    );
 
     res.json({
       success: true,
-      fareEstimate,
-      pricingSettings: {
-        baseFareStandard: pricingSettings.baseFareStandard,
-        perMileFare: pricingSettings.perMileFare,
-        perMinuteFare: pricingSettings.perMinuteFare,
-        surgePricing: pricingSettings.surgePricing,
-        maxSurgeMultiplier: pricingSettings.maxSurgeMultiplier
-      },
+      estimates,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Fare estimate error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Failed to calculate fare estimate',
       message: 'Please try again later'
@@ -7856,6 +7878,7 @@ io.on('connection', (socket) => {
       // Notify rider
       const riderId = rideRequest?.riderId || updatedRide?.rider_id;
       io.to(`user-${riderId}`).emit('ride-accepted', {
+        rideId: rideId,  // ← ADD THIS LINE
         ride: updatedRide,
         driver: {
           id: driver.id,
@@ -7984,28 +8007,30 @@ if (!rideRequest) {
         driverLocation = driverAvailability.get(socket.userId) || { lat: 36.3729, lng: -94.2088 };
       }
 
+      
       // 🎉 NEW: Notify rider with FLASHING success and driver location
-      const riderId = rideRequest?.riderId || updatedRide?.rider_id;
-      io.to(`user-${riderId}`).emit('ride-accepted', {
-        ride: updatedRide,
-        driver: {
-          id: driver.id,
-          driverId: socket.userId, // Add driverId for tracking
-          name: `${driver.first_name} ${driver.last_name}`,
-          rating: driver.rating,
-          phone: driver.phone,
-          vehicle: {
-            model: driverData?.vehicleType || 'Vehicle',
-            color: driverData?.vehicleColor || 'Blue',
-            plate: driverData?.licensePlate || 'ABC-123',
-            type: driverData?.vehicleType || 'sedan'
+        const riderId = rideRequest?.riderId || updatedRide?.rider_id;
+        io.to(`user-${riderId}`).emit('ride-accepted', {
+          rideId: rideId,
+          ride: updatedRide,
+          driver: {
+            id: driver.id,
+            driverId: socket.userId, // Add driverId for tracking
+            name: `${driver.first_name} ${driver.last_name}`,
+            rating: driver.rating,
+            phone: driver.phone,
+            vehicle: {
+              model: driverData?.vehicleType || 'Vehicle',
+              color: driverData?.vehicleColor || 'Blue',
+              plate: driverData?.licensePlate || 'ABC-123',
+              type: driverData?.vehicleType || 'sedan'
+            },
+            location: driverLocation
           },
-          location: driverLocation
-        },
-        // 🎉 SPECIAL: Trigger flashing green lights + success message
-        triggerFlashingSuccess: true,
-        successMessage: 'We found your Driver!'
-      });
+          // 🎉 SPECIAL: Trigger flashing green lights + success message
+          triggerFlashingSuccess: true,
+          successMessage: 'We found your Driver!'
+        });
       
       console.log(`✅ Sent driver location to rider ${riderId}:`, driverLocation);
       
