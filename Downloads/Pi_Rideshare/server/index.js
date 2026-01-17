@@ -5856,8 +5856,8 @@ app.post('/api/rides/estimate', async (req, res) => {
           baseFare: fareData.baseFare,
           distanceFare: fareData.distanceFare,
           timeFare: fareData.timeFare,
-          totalFare: fareData.totalFare,
-          surgeMultiplier: fareData.surgeMultiplier || 1,
+          totalFare: fareData.total,
+          surgeMultiplier: fareData.surge?.multiplier || 1,
           estimatedMinutes: fareData.estimatedMinutes,
           distanceMiles: fareData.distanceMiles
         };
