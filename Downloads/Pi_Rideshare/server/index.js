@@ -7818,12 +7818,23 @@ io.on('connection', (socket) => {
           io.to(`user-${ride.driver_id}`).emit('ride-cancelled', cancellationData);
           console.log(`📡 [CANCEL] Emitted ride-cancelled to driver ${ride.driver_id}`);
           
-          // Reset driver availability
+          // Reset driver availability - DIRECT DATABASE UPDATE
+          try {
+            await db.query(
+              `UPDATE driver_locations SET is_available = true, updated_at = CURRENT_TIMESTAMP WHERE driver_id = $1`,
+              [ride.driver_id]
+            );
+            console.log(`✅ [CANCEL] Driver ${ride.driver_id} is_available set to TRUE in database`);
+          } catch (dbError) {
+            console.error(`❌ [CANCEL] Failed to update driver availability in database:`, dbError);
+          }
+          
+          // Also update in-memory map
           updateDriverAvailability(ride.driver_id, {
             isAvailable: true,
             currentRideId: null
           });
-          console.log(`✅ [CANCEL] Driver ${ride.driver_id} availability reset`);
+          console.log(`✅ [CANCEL] Driver ${ride.driver_id} availability reset in memory`);
         }
         
         // Confirm cancellation to rider
