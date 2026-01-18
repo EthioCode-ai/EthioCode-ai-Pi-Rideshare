@@ -211,20 +211,70 @@ const speedLimiter = slowDown({
 async function getAirportsFromDB() {
   try {
     const result = await pool.query(
-      'SELECT airport_code, airport_name, latitude, longitude, geofence_radius_km, waiting_lot_lat, waiting_lot_lng, waiting_lot_name FROM airport_zones WHERE is_active = true'
+      `SELECT airport_code, airport_name, latitude, longitude, geofence_radius_km,
+              waiting_lot_a_lat, waiting_lot_a_lng, waiting_lot_a_name,
+              waiting_lot_b_lat, waiting_lot_b_lng, waiting_lot_b_name,
+              waiting_lot_c_lat, waiting_lot_c_lng, waiting_lot_c_name,
+              waiting_lot_d_lat, waiting_lot_d_lng, waiting_lot_d_name,
+              waiting_lot_e_lat, waiting_lot_e_lng, waiting_lot_e_name,
+              pickup_a_lat, pickup_a_lng, pickup_a_name,
+              pickup_b_lat, pickup_b_lng, pickup_b_name,
+              pickup_c_lat, pickup_c_lng, pickup_c_name,
+              pickup_d_lat, pickup_d_lng, pickup_d_name,
+              pickup_e_lat, pickup_e_lng, pickup_e_name,
+              dropoff_a_lat, dropoff_a_lng, dropoff_a_name,
+              dropoff_b_lat, dropoff_b_lng, dropoff_b_name,
+              dropoff_c_lat, dropoff_c_lng, dropoff_c_name,
+              dropoff_d_lat, dropoff_d_lng, dropoff_d_name,
+              dropoff_e_lat, dropoff_e_lng, dropoff_e_name
+       FROM airport_zones WHERE is_active = true`
     );
-    return result.rows.map(row => ({
-      name: `${row.airport_code} - ${row.airport_name}`,
-      code: row.airport_code,
-      lat: parseFloat(row.latitude),
-      lng: parseFloat(row.longitude),
-      radius: parseFloat(row.geofence_radius_km),
-      waitingLot: row.waiting_lot_lat && row.waiting_lot_lng ? {
-        lat: parseFloat(row.waiting_lot_lat),
-        lng: parseFloat(row.waiting_lot_lng),
-        name: row.waiting_lot_name || `${row.airport_code} Waiting Lot`
-      } : null
-    }));
+    return result.rows.map(row => {
+      // Build array of lots (A through E) with waiting, pickup, dropoff
+      const lots = [];
+      const lotKeys = ['a', 'b', 'c', 'd', 'e'];
+      
+      lotKeys.forEach(key => {
+        const waitingLat = row[`waiting_lot_${key}_lat`];
+        const waitingLng = row[`waiting_lot_${key}_lng`];
+        
+        // Only add lot if waiting lot coordinates exist
+        if (waitingLat && waitingLng) {
+          const pickupLat = row[`pickup_${key}_lat`];
+          const pickupLng = row[`pickup_${key}_lng`];
+          const dropoffLat = row[`dropoff_${key}_lat`];
+          const dropoffLng = row[`dropoff_${key}_lng`];
+          
+          lots.push({
+            id: `${row.airport_code}-${key.toUpperCase()}`,
+            waitingLot: {
+              lat: parseFloat(waitingLat),
+              lng: parseFloat(waitingLng),
+              name: row[`waiting_lot_${key}_name`] || `${row.airport_code} Waiting Lot ${key.toUpperCase()}`
+            },
+            pickup: pickupLat && pickupLng ? {
+              lat: parseFloat(pickupLat),
+              lng: parseFloat(pickupLng),
+              name: row[`pickup_${key}_name`] || `${row.airport_code} Pickup ${key.toUpperCase()}`
+            } : null,
+            dropoff: dropoffLat && dropoffLng ? {
+              lat: parseFloat(dropoffLat),
+              lng: parseFloat(dropoffLng),
+              name: row[`dropoff_${key}_name`] || `${row.airport_code} Dropoff ${key.toUpperCase()}`
+            } : null
+          });
+        }
+      });
+      
+      return {
+        name: `${row.airport_code} - ${row.airport_name}`,
+        code: row.airport_code,
+        lat: parseFloat(row.latitude),
+        lng: parseFloat(row.longitude),
+        radius: parseFloat(row.geofence_radius_km),
+        lots: lots
+      };
+    });
   } catch (error) {
     console.error('Error fetching airports from DB:', error);
     return [];
@@ -9285,36 +9335,50 @@ app.get('/api/airports/rideshare-lots', async (req, res) => {
     
     const airports = await getAirportsFromDB();
     
-    // Filter airports with waiting lots
-    let airportsWithLots = airports.filter(airport => airport.waitingLot);
+    // Build flat array of all waiting lots from all airports
+    let allLots = [];
     
+    airports.forEach(airport => {
+      if (airport.lots && airport.lots.length > 0) {
+        const queue = airportDriverQueues.get(airport.name) || [];
+        
+        airport.lots.forEach(lot => {
+          allLots.push({
+            id: lot.id,
+            airportCode: airport.code,
+            airportName: airport.name,
+            // Waiting lot info
+            lat: lot.waitingLot.lat,
+            lng: lot.waitingLot.lng,
+            name: lot.waitingLot.name,
+            // Pickup location (if exists)
+            pickup: lot.pickup,
+            // Dropoff location (if exists)
+            dropoff: lot.dropoff,
+            // Queue info
+            queueSize: queue.length,
+            queueByVehicleType: {
+              economy: 0,
+              standard: 0,
+              xl: 0,
+              premium: 0
+            }
+          });
+        });
+      }
+    });
+
     // Filter by map bounds if provided
     if (minLat && maxLat && minLng && maxLng) {
-      airportsWithLots = airportsWithLots.filter(airport => {
-        const lot = airport.waitingLot;
-        return lot.lat >= parseFloat(minLat) && 
-               lot.lat <= parseFloat(maxLat) && 
-               lot.lng >= parseFloat(minLng) && 
+      allLots = allLots.filter(lot => {
+        return lot.lat >= parseFloat(minLat) &&
+               lot.lat <= parseFloat(maxLat) &&
+               lot.lng >= parseFloat(minLng) &&
                lot.lng <= parseFloat(maxLng);
       });
     }
-    
-    const lots = airportsWithLots.map(airport => {
-      const queue = airportDriverQueues.get(airport.name) || [];
-      return {
-        code: airport.code,
-        name: airport.waitingLot.name,
-        lat: airport.waitingLot.lat,
-        lng: airport.waitingLot.lng,
-        queueSize: queue.length,
-        queueByVehicleType: {
-          economy: 0,
-          standard: 0,
-          xl: 0,
-          premium: 0
-        }
-      };
-    });
+
+    const lots = allLots;
     
     res.json({ success: true, lots });
   } catch (error) {
