@@ -7418,7 +7418,7 @@ function getNextDriverFromAirportQueue(airportName) {
 }
 
 // Update driver availability
-function updateDriverAvailability(driverId, data) {
+async function updateDriverAvailability(driverId, data) {
   const existing = driverAvailability.get(driverId) || {};
   const updatedData = {
     ...existing,
@@ -7426,13 +7426,27 @@ function updateDriverAvailability(driverId, data) {
     driverId: driverId, // 🔧 CRITICAL FIX: Always include driverId in stored object
     lastLocationUpdate: new Date()
   };
-
   driverAvailability.set(driverId, updatedData);
+
+  // 🔧 DATABASE FIX: Also update the database so driver is found in queries
+  try {
+    if (data.isAvailable !== undefined) {
+      await db.query(
+        `UPDATE driver_locations 
+         SET is_available = $1, 
+             updated_at = CURRENT_TIMESTAMP 
+         WHERE driver_id = $2`,
+        [data.isAvailable, driverId]
+      );
+      console.log(`✅ [DB] Driver ${driverId} availability updated: is_available=${data.isAvailable}`);
+    }
+  } catch (dbError) {
+    console.error(`❌ [DB] Failed to update driver ${driverId} availability:`, dbError);
+  }
 
   // Check if driver is near an airport and manage queue
   if (data.lat && data.lng && data.isAvailable) {
     const nearbyAirport = getNearbyAirport(data.lat, data.lng);
-
     if (nearbyAirport && !existing.currentAirport) {
       // Driver entered airport area
       addDriverToAirportQueue(driverId, nearbyAirport.name);
