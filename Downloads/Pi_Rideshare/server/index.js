@@ -210,7 +210,7 @@ const speedLimiter = slowDown({
 // Get airports from database
 async function getAirportsFromDB() {
   try {
-    const result = await pool.query(
+    const result = await db.query(
       `SELECT airport_code, airport_name, latitude, longitude, geofence_radius_km,
               waiting_lot_a_lat, waiting_lot_a_lng, waiting_lot_a_name,
               waiting_lot_b_lat, waiting_lot_b_lng, waiting_lot_b_name,
