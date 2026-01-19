@@ -230,6 +230,28 @@ const Dashboard: React.FC = () => {
     };
   }, []);
   
+  // Fetch active rides for dashboard
+  const fetchActiveRides = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) return;
+
+      const response = await fetch(apiUrl('api/rides/active'), {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setActiveRides(data.rides || []);
+          console.log(`🚗 Dashboard: ${data.rides?.length || 0} active rides`);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching active rides:', error);
+    }
+  };
+
   // Fetch real analytics data
   const fetchRealAnalytics = async () => {
     try {
@@ -259,15 +281,19 @@ const Dashboard: React.FC = () => {
   // Fetch real data when component mounts or market changes
   useEffect(() => {
     fetchRealAnalytics();
+    fetchActiveRides();
     fetchSurgeData();
     fetchHeatmapData();
   }, [selectedMarket]);
   
   // Auto-refresh analytics every 30 seconds
   useEffect(() => {
-  const interval = setInterval(fetchHeatmapData, 60000);
-  return () => clearInterval(interval);
-}, []);
+    const interval = setInterval(() => {
+      fetchHeatmapData();
+      fetchActiveRides();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
   
 
   // Dynamic stats based on real-time data
@@ -1286,6 +1312,154 @@ const Dashboard: React.FC = () => {
             </div>
           )}
         </div>
+      </div>
+{/* Active Rides Section */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '16px',
+        padding: '20px',
+        marginBottom: '24px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+        border: '1px solid #e2e8f0'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '16px'
+        }}>
+          <div>
+            <h2 style={{
+              fontSize: '20px',
+              fontWeight: '700',
+              color: '#1e293b',
+              margin: '0 0 4px 0'
+            }}>
+              🚗 Active Rides
+            </h2>
+            <p style={{
+              fontSize: '14px',
+              color: '#64748b',
+              margin: 0
+            }}>
+              Real-time view of rides in progress
+            </p>
+          </div>
+          <button
+            onClick={fetchActiveRides}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#f1f5f9',
+              border: '1px solid #cbd5e1',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: '600',
+              color: '#475569',
+              cursor: 'pointer'
+            }}
+          >
+            🔄 Refresh
+          </button>
+        </div>
+
+        {activeRides.length === 0 ? (
+          <div style={{
+            padding: '40px',
+            textAlign: 'center',
+            color: '#64748b',
+            backgroundColor: '#f8fafc',
+            borderRadius: '12px',
+            border: '2px dashed #e2e8f0'
+          }}>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>🚗</div>
+            <div style={{ fontSize: '16px', fontWeight: '600' }}>No Active Rides</div>
+            <div style={{ fontSize: '14px', marginTop: '4px' }}>Rides will appear here when drivers accept requests</div>
+          </div>
+        ) : (
+          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {activeRides.map((ride) => (
+              <div
+                key={ride.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 2fr 2fr 100px 100px',
+                  alignItems: 'center',
+                  padding: '16px',
+                  backgroundColor: '#f8fafc',
+                  borderRadius: '12px',
+                  marginBottom: '12px',
+                  border: '1px solid #e2e8f0',
+                  gap: '16px'
+                }}
+              >
+                {/* Status */}
+                <div>
+                  <span style={{
+                    padding: '4px 12px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    backgroundColor: 
+                      ride.status === 'requested' ? '#fef3c7' :
+                      ride.status === 'accepted' ? '#dbeafe' :
+                      ride.status === 'en_route' ? '#d1fae5' :
+                      ride.status === 'arrived' ? '#fce7f3' : '#f1f5f9',
+                    color:
+                      ride.status === 'requested' ? '#92400e' :
+                      ride.status === 'accepted' ? '#1e40af' :
+                      ride.status === 'en_route' ? '#065f46' :
+                      ride.status === 'arrived' ? '#9d174d' : '#475569'
+                  }}>
+                    {ride.status === 'requested' ? '⏳ Requested' :
+                     ride.status === 'accepted' ? '✅ Accepted' :
+                     ride.status === 'en_route' ? '🚗 En Route' :
+                     ride.status === 'arrived' ? '📍 Arrived' : ride.status}
+                  </span>
+                </div>
+
+                {/* Pickup */}
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', marginBottom: '2px' }}>
+                    📍 PICKUP
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#1e293b', fontWeight: '500' }}>
+                    {ride.pickup_address?.substring(0, 40)}...
+                  </div>
+                </div>
+
+                {/* Destination */}
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', marginBottom: '2px' }}>
+                    🎯 DESTINATION
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#1e293b', fontWeight: '500' }}>
+                    {ride.destination_address?.substring(0, 40)}...
+                  </div>
+                </div>
+
+                {/* Rider */}
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', marginBottom: '2px' }}>
+                    👤 RIDER
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#1e293b', fontWeight: '500' }}>
+                    {ride.rider_name || 'Unknown'}
+                  </div>
+                </div>
+
+                {/* Fare */}
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', marginBottom: '2px' }}>
+                    💰 FARE
+                  </div>
+                  <div style={{ fontSize: '16px', color: '#10b981', fontWeight: '700' }}>
+                    ${parseFloat(ride.estimated_fare || 0).toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Stats Grid */}
