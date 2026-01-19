@@ -2626,12 +2626,27 @@ app.post('/api/rides/request', rideLimiter, authenticateToken, async (req, res) 
     }
 
     // Store ride request for matching algorithm
+    // Store ride request for matching algorithm
     activeRideRequests.set(ride.id, {
       id: ride.id,
       pickup: pickup.coordinates,
       destination: destination.coordinates,
       pickupAddress: pickup.address || 'Pickup Location',
       destinationAddress: destination.address || 'Destination',
+      // Airport fields for pickup
+      pickupIsAirport: pickup.isAirport || false,
+      pickupAirportCode: pickup.airportCode,
+      pickupAirportName: pickup.airportName,
+      pickupZoneCode: pickup.zoneCode,
+      pickupZoneName: pickup.zoneName,
+      pickupDoorLocation: pickup.doorLocation,
+      // Airport fields for destination
+      destinationIsAirport: destination.isAirport || false,
+      destinationAirportCode: destination.airportCode,
+      destinationAirportName: destination.airportName,
+      destinationZoneCode: destination.zoneCode,
+      destinationZoneName: destination.zoneName,
+      destinationDoorLocation: destination.doorLocation,
       rideType: rideType || 'standard',
       requestedAt: new Date(),
       riderId: rider_id || req.user.userId,
@@ -2688,6 +2703,20 @@ app.post('/api/rides/request', rideLimiter, authenticateToken, async (req, res) 
           destination: destination.coordinates,
           pickupAddress: pickup.address || 'Current Location',
           destinationAddress: destination.address || 'Destination',
+          // Airport fields for pickup
+          pickupIsAirport: pickup.isAirport || false,
+          pickupAirportCode: pickup.airportCode,
+          pickupAirportName: pickup.airportName,
+          pickupZoneCode: pickup.zoneCode,
+          pickupZoneName: pickup.zoneName,
+          pickupDoorLocation: pickup.doorLocation,
+          // Airport fields for destination
+          destinationIsAirport: destination.isAirport || false,
+          destinationAirportCode: destination.airportCode,
+          destinationAirportName: destination.airportName,
+          destinationZoneCode: destination.zoneCode,
+          destinationZoneName: destination.zoneName,
+          destinationDoorLocation: destination.doorLocation,
           estimatedFare: estimatedFare.total || estimatedFare,
           rideType: rideType || 'standard',
           riderPreferences: riderPreferences || {
@@ -2696,6 +2725,8 @@ app.post('/api/rides/request', rideLimiter, authenticateToken, async (req, res) 
             temperature: 'no-preference'
           },
           riderId: req.user.userId,
+          riderFirstName: riderFirstName,
+          riderRating: 4.8,
           availableDrivers: matchResult,
           currentDriverIndex: 0,
           attemptCount: 0,
@@ -6767,12 +6798,26 @@ console.log(`💰 Driver earnings calculation: $${totalFare} × ${marketSettings
     pickup: {
       lat: requestData.pickup.lat,
       lng: requestData.pickup.lng,
-      address: requestData.pickupAddress
+      address: requestData.pickupAddress,
+      // Airport fields
+      isAirport: requestData.pickupIsAirport || false,
+      airportCode: requestData.pickupAirportCode,
+      airportName: requestData.pickupAirportName,
+      zoneCode: requestData.pickupZoneCode,
+      zoneName: requestData.pickupZoneName,
+      doorLocation: requestData.pickupDoorLocation
     },
     destination: {
       lat: requestData.destination.lat,
       lng: requestData.destination.lng,
-      address: requestData.destinationAddress
+      address: requestData.destinationAddress,
+      // Airport fields
+      isAirport: requestData.destinationIsAirport || false,
+      airportCode: requestData.destinationAirportCode,
+      airportName: requestData.destinationAirportName,
+      zoneCode: requestData.destinationZoneCode,
+      zoneName: requestData.destinationZoneName,
+      doorLocation: requestData.destinationDoorLocation
     },
     estimatedFare: driverEarnings,
     totalFare: totalFare,
