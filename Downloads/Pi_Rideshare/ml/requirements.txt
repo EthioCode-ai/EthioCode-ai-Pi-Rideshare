@@ -1,8 +1,4 @@
-New-Item -Path "C:\Users\abiys\Downloads\Pi_Rideshare\ml\requirements.txt" -ItemType File
-```
-
-Then paste:
-```
+Set-Content -Path "C:\Users\abiys\Downloads\Pi_Rideshare\ml\requirements.txt" -Value @"
 flask==3.0.0
 flask-cors==4.0.0
 numpy==1.26.0
@@ -10,3 +6,4 @@ pandas==2.1.0
 scikit-learn==1.3.0
 joblib==1.3.0
 gunicorn==21.2.0
+"@
