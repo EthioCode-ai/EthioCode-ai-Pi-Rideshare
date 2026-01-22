@@ -9446,10 +9446,10 @@ app.get('/api/airports/rideshare-lots', async (req, res) => {
             // Queue info
             queueSize: queue.length,
             queueByVehicleType: {
-              economy: 0,
-              standard: 0,
-              xl: 0,
-              premium: 0
+              economy: queue.filter(d => d.vehicleType === 'economy').length,
+              standard: queue.filter(d => d.vehicleType === 'standard').length,
+              xl: queue.filter(d => d.vehicleType === 'xl').length,
+              premium: queue.filter(d => d.vehicleType === 'premium').length
             }
           });
         });
