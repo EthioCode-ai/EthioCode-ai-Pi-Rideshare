@@ -7374,7 +7374,13 @@ function isInAirportZone(lat, lng, airportCode, zoneName, radiusMeters = 100) {
 }
 
 // Add driver to airport queue
-function addDriverToAirportQueue(driverId, airportName) {
+function addDriverToAirportQueue(driverId, airportName, vehicleType) {
+  // Get vehicle type from driverAvailability if not provided
+  if (!vehicleType) {
+    const driverData = driverAvailability.get(driverId);
+    vehicleType = driverData?.vehicleType || 'standard';
+  }
+  
   if (!airportDriverQueues.has(airportName)) {
     airportDriverQueues.set(airportName, []);
   }
@@ -7390,6 +7396,7 @@ function addDriverToAirportQueue(driverId, airportName) {
   // Add driver to end of queue
   queue.push({
     driverId,
+    vehicleType: vehicleType,
     joinedAt: new Date(),
     position: queue.length + 1
   });
@@ -7494,7 +7501,7 @@ async function updateDriverAvailability(driverId, data) {
     const nearbyAirport = await getNearbyAirport(data.lat, data.lng);
     if (nearbyAirport && !existing.currentAirport) {
       // Driver entered airport area
-      addDriverToAirportQueue(driverId, nearbyAirport.name);
+      addDriverToAirportQueue(driverId, nearbyAirport.name, updatedData.vehicleType || 'standard');
       updatedData.currentAirport = nearbyAirport.name;
       driverAvailability.set(driverId, updatedData);
     } else if (!nearbyAirport && existing.currentAirport) {
@@ -9378,13 +9385,24 @@ app.get('/api/airports/queues', async (req, res) => {
 
     airports.forEach(airport => {
       const queue = airportDriverQueues.get(airport.name) || [];
+      
+      // Count by vehicle type
+      const queueByType = {
+        economy: queue.filter(d => d.vehicleType === 'economy').length,
+        standard: queue.filter(d => d.vehicleType === 'standard').length,
+        xl: queue.filter(d => d.vehicleType === 'xl').length,
+        premium: queue.filter(d => d.vehicleType === 'premium').length
+      };
+      
       queueStatus[airport.name] = {
         name: airport.name,
         location: { lat: airport.lat, lng: airport.lng },
         queueLength: queue.length,
+        queueByType: queueByType,
         estimatedWaitTime: Math.max(5, queue.length * 8),
         drivers: queue.map((driver, index) => ({
           position: index + 1,
+          vehicleType: driver.vehicleType,
           joinedAt: driver.joinedAt,
           waitTime: Math.round((Date.now() - driver.joinedAt.getTime()) / 60000)
         }))
