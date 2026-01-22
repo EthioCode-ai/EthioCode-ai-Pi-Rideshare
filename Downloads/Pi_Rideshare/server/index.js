@@ -7491,7 +7491,7 @@ async function updateDriverAvailability(driverId, data) {
 
   // Check if driver is near an airport and manage queue
   if (data.lat && data.lng && data.isAvailable) {
-    const nearbyAirport = getNearbyAirport(data.lat, data.lng);
+    const nearbyAirport = await getNearbyAirport(data.lat, data.lng);
     if (nearbyAirport && !existing.currentAirport) {
       // Driver entered airport area
       addDriverToAirportQueue(driverId, nearbyAirport.name);
