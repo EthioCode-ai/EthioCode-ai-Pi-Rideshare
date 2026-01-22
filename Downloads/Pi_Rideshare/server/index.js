@@ -941,7 +941,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     const token = jwt.sign(
       { userId: user.id, email: user.email, userType: user.user_type },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '30d' }
     );
 
     res.json({
@@ -1387,7 +1387,7 @@ app.post('/api/auth/send-verification', authenticateToken, async (req, res) => {
     const verificationToken = jwt.sign(
       { userId: user.id, email: user.email, type: 'email_verification' },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '30d' }
     );
 
     // In production, send verification email here
