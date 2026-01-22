@@ -957,10 +957,17 @@ const Dashboard: React.FC = () => {
               <div style="font-size: 11px; color: #6b7280;">
                 📍 ${lot.lat.toFixed(6)}, ${lot.lng.toFixed(6)}
               </div>
-              <div style="font-size: 12px; margin-top: 6px; color: #059669;">
-                👥 ${lot.queueSize || 0} drivers in queue
+              <div style="font-size: 12px; margin-top: 8px;">
+                <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">Queue by Type:</div>
+                <div style="font-size: 11px;">
+                  ${Object.entries(lot.queueByVehicleType || {}).map(([type, count]) => 
+                    `<div>${type}: ${count}</div>`
+                  ).join('')}
+                </div>
+                <div style="margin-top: 4px; color: #059669; font-weight: 600;">
+                  👥 Total: ${lot.queueSize || 0} drivers
+                </div>
               </div>
-            </div>
           `
         });
 
