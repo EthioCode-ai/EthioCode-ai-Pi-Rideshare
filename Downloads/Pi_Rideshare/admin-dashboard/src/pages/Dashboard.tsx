@@ -49,6 +49,8 @@ const Dashboard: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [realDrivers, setRealDrivers] = useState<any[]>([]);
   const [realRiders, setRealRiders] = useState<any[]>([]);
+  const [airportLots, setAirportLots] = useState<any[]>([]);
+  const [airportMarkers, setAirportMarkers] = useState<any[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [liveStats, setLiveStats] = useState({
     pendingRequests: 0,
@@ -252,6 +254,28 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // Fetch airport waiting lots for map display
+  const fetchAirportLots = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) return;
+
+      const response = await fetch(apiUrl('api/airports/rideshare-lots'), {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.lots) {
+          setAirportLots(data.lots);
+          console.log(`✈️ Dashboard: ${data.lots.length} airport lots loaded`);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching airport lots:', error);
+    }
+  };
+
   // Fetch real analytics data
   const fetchRealAnalytics = async () => {
     try {
@@ -282,6 +306,7 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     fetchRealAnalytics();
     fetchActiveRides();
+    fetchAirportLots();  // Add this line
     fetchSurgeData();
     fetchHeatmapData();
   }, [selectedMarket]);
@@ -788,6 +813,7 @@ const Dashboard: React.FC = () => {
     // Clear existing markers
     driverMarkers.forEach(marker => marker.setMap(null));
     riderMarkers.forEach(marker => marker.setMap(null));
+    airportMarkers.forEach(marker => marker.setMap(null));
 
     const newDriverMarkers: any[] = [];
     const newRiderMarkers: any[] = [];
@@ -896,7 +922,57 @@ const Dashboard: React.FC = () => {
         }
       });
 
+      // Add airport waiting lot markers
+    const newAirportMarkers: any[] = [];
+    airportLots.forEach(lot => {
+      if (lot.lat && lot.lng) {
+        const icon = {
+          url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+            <svg width="40" height="50" viewBox="0 0 40 50" xmlns="http://www.w3.org/2000/svg">
+              <rect x="5" y="5" width="30" height="30" rx="4" fill="#3b82f6" stroke="#1d4ed8" stroke-width="2"/>
+              <text x="20" y="27" text-anchor="middle" fill="white" font-size="18">✈️</text>
+              <rect x="2" y="38" width="36" height="12" rx="2" fill="white" stroke="#3b82f6" stroke-width="1"/>
+              <text x="20" y="47" text-anchor="middle" fill="#1e40af" font-size="7" font-weight="bold">${lot.airportCode || 'APT'}</text>
+            </svg>
+          `),
+          scaledSize: new window.google.maps.Size(40, 50),
+          anchor: new window.google.maps.Point(20, 50)
+        };
 
+        const marker = new window.google.maps.Marker({
+          position: { lat: lot.lat, lng: lot.lng },
+          map: currentMap,
+          icon: icon,
+          title: lot.name || 'Airport Waiting Lot'
+        });
+
+        const infoWindow = new window.google.maps.InfoWindow({
+          content: `
+            <div style="padding: 10px; font-family: Arial, sans-serif; min-width: 180px;">
+              <div style="font-weight: bold; color: #1e40af; font-size: 14px;">✈️ ${lot.airportName || 'Airport'}</div>
+              <div style="font-size: 12px; color: #3b82f6; margin: 4px 0;">${lot.airportCode || ''}</div>
+              <div style="font-size: 13px; color: #1f2937; margin: 8px 0; padding: 6px; background: #f0f9ff; border-radius: 4px;">
+                🅿️ <strong>${lot.name || 'Waiting Lot'}</strong>
+              </div>
+              <div style="font-size: 11px; color: #6b7280;">
+                📍 ${lot.lat.toFixed(6)}, ${lot.lng.toFixed(6)}
+              </div>
+              <div style="font-size: 12px; margin-top: 6px; color: #059669;">
+                👥 ${lot.queueSize || 0} drivers in queue
+              </div>
+            </div>
+          `
+        });
+
+        marker.addListener('click', () => {
+          infoWindow.open(currentMap, marker);
+        });
+
+        newAirportMarkers.push(marker);
+      }
+    });
+
+    setAirportMarkers(newAirportMarkers);
     setDriverMarkers(newDriverMarkers);
     setRiderMarkers(newRiderMarkers);
   };
