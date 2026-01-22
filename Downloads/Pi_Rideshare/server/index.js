@@ -79,6 +79,7 @@ const chatRoutes = require('./chatbot/chat-routes'); // AI Customer Support Chat
 const marketSettingsDB = require('./marketSettingsDB');
 const Stripe = require('stripe');
 const multer = require('multer');
+const mlClient = require('./ml-client');
 
 // ═══════════════════════════════════════════════════════════════════
 // PHASE 2.6: Route & Surge Enhancement Constants
@@ -4976,7 +4977,45 @@ function calculateAdjustedETA(baseMinutes, trafficMult, weatherMult, weatherDela
 
 
 // Database-driven surge pricing calculation with configurable rules
+// Database-driven surge pricing calculation with ML integration
 async function calculateSurgeMultiplier(pickupLat, pickupLng) {
+  // Try ML prediction first
+  try {
+    const availableDrivers = Array.from(driverAvailability.values())
+      .filter(d => d.isAvailable).length;
+    const pendingRequests = activeRideRequests ? activeRideRequests.size : 0;
+    
+    const mlResult = await mlClient.predictSurge({
+      zone: 'pickup_area',
+      lat: pickupLat,
+      lng: pickupLng,
+      conditions: {
+        activeDrivers: availableDrivers,
+        pendingRequests: pendingRequests
+      }
+    });
+    
+    if (mlResult && mlResult.confidence >= 0.7) {
+      console.log(`🤖 ML Surge: ${mlResult.multiplier}x (${Math.round(mlResult.confidence * 100)}% confidence)`);
+      return {
+        multiplier: mlResult.multiplier,
+        isActive: mlResult.multiplier > 1.1,
+        factors: [mlResult.reasoning || 'ML Prediction'],
+        demandLevel: mlResult.multiplier >= 2.0 ? 'Very High' : 
+                     mlResult.multiplier >= 1.5 ? 'High' : 
+                     mlResult.multiplier >= 1.2 ? 'Moderate' : 'Low',
+        availableDrivers: availableDrivers,
+        pendingRequests: pendingRequests,
+        mlPowered: true,
+        mlConfidence: mlResult.confidence
+      };
+    }
+    console.log('⚠️ ML confidence too low, falling back to rules');
+  } catch (mlError) {
+    console.warn('⚠️ ML surge unavailable:', mlError.message);
+  }
+
+  // Fallback to database-driven rules
   if (!db) {
     // Fallback to minimal surge if database not available
     return {
