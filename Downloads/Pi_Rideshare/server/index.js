@@ -8645,14 +8645,14 @@ app.get('/api/driver/earnings/:driverId', authenticateToken, async (req, res) =>
     const payoutBalance = await db.getAvailableBalance(driverId);
 
     res.json({
-      today: todaySummary.total_earnings || 0,   // ✅ Today's actual earnings (includes compensation)
-      week: weekSummary.total_earnings || 0,     // ✅ Week's actual earnings  
-      month: monthSummary.total_earnings || 0,   // ✅ Month's actual earnings
-      trips: todaySummary.total_rides || 0,      // ✅ Today's trip count
-      hours: 8, // Placeholder - would need time tracking
-      rating: 4.9, // Placeholder - would need rating system
-      lastRide: todaySummary.avg_per_ride || 0,  // ✅ Average per ride today
-      miles: 0 // Placeholder - would need distance tracking
+      today: todaySummary.total_earnings || 0,
+      week: weekSummary.total_earnings || 0,
+      month: monthSummary.total_earnings || 0,
+      trips: todaySummary.total_rides || 0,
+      hours: 0, // TODO: implement online time tracking
+      rating: 4.9, // TODO: implement rating system
+      lastRide: todaySummary.avg_per_ride || 0,
+      miles: todaySummary.total_miles || 0
     });
   } catch (error) {
     console.error('Get driver earnings error:', error);

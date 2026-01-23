@@ -106,6 +106,11 @@ const initializeDatabase = async () => {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS temperature_preference VARCHAR(20) DEFAULT 'cool';
     `);
 
+// Add distance_miles column to rides table
+    await client.query(`
+      ALTER TABLE rides ADD COLUMN IF NOT EXISTS distance_miles DECIMAL(10,2) DEFAULT 0;
+    `);
+
     // Add payment processing columns to rides table
     await client.query(`
       ALTER TABLE rides ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pending';
@@ -919,14 +924,15 @@ const db = {
     }
 
     const result = await pool.query(`
-      SELECT 
+      SELECT
         COUNT(de.id) as total_rides,
         COALESCE(SUM(de.base_fare), 0) as total_base_fare,
         COALESCE(SUM(de.tip_amount), 0) as total_tips,
         COALESCE(SUM(de.bonus_amount), 0) as total_bonuses,
         COALESCE(SUM(de.platform_fee), 0) as total_fees,
         COALESCE(SUM(de.total_earned), 0) as total_earnings,
-        COALESCE(AVG(de.total_earned), 0) as avg_per_ride
+        COALESCE(AVG(de.total_earned), 0) as avg_per_ride,
+        COALESCE(SUM(r.distance_miles), 0) as total_miles
       FROM driver_earnings de
       WHERE de.driver_id = $1 ${dateFilter}
     `, [driverId]);
