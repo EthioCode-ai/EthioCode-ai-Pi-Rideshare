@@ -1,6 +1,7 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
+import AdminLogin from './components/AdminLogin';
 import Dashboard from './pages/Dashboard';
 import RiderApp from './pages/RiderApp';
 import RiderAuthFixed from './pages/RiderAuthFixed';
@@ -33,17 +34,50 @@ import DownloadDriver from './pages/DownloadDriver';
 import RiderBadgeVerification from './pages/RiderBadgeVerification';
 import PushNotifications from './pages/PushNotifications';
 
+// Protected Route wrapper
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const token = localStorage.getItem('authToken');
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+};
+
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('authToken');
+    setIsAuthenticated(!!token);
+    setIsLoading(false);
+  }, []);
+
+  const handleLogin = (token: string, user: any) => {
+    localStorage.setItem('authToken', token);
+    localStorage.setItem('adminUser', JSON.stringify(user));
+    setIsAuthenticated(true);
+  };
+
+    if (isLoading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
+  }
+
   return (
     <Router>
       <Routes>
+        {/* Login Route */}
+        <Route path="/login" element={
+          isAuthenticated ? <Navigate to="/dashboard" replace /> : <AdminLogin onLogin={handleLogin} />
+        } />
+
         {/* App Selection */}
         <Route path="/" element={<AppSelector />} />
-        
+
         {/* Download/Install Pages */}
         <Route path="/download-rider" element={<DownloadRider />} />
         <Route path="/download-driver" element={<DownloadDriver />} />
-        
+
         {/* Public routes */}
         <Route path="/rider" element={<RiderApp />} />
         <Route path="/rider/auth" element={<RiderAuthFixed />} />
@@ -54,8 +88,12 @@ export default function App() {
         <Route path="/airport-queue" element={<AirportQueue />} />
         <Route path="/car-demo" element={<CarDemo />} />
 
-        {/* Admin Dashboard routes with Layout */}
-        <Route path="/dashboard" element={<Layout />}>
+        {/* Admin Dashboard routes with Layout - PROTECTED */}
+        <Route path="/dashboard" element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }>
           <Route index element={<Dashboard />} />
           <Route path="drivers" element={<DriverManagement />} />
           <Route path="riders" element={<RiderManagement />} />
