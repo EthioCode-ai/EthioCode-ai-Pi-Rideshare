@@ -106,6 +106,21 @@ const initializeDatabase = async () => {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS temperature_preference VARCHAR(20) DEFAULT 'cool';
     `);
 
+// Saved places table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS saved_places (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(100) NOT NULL,
+        label VARCHAR(50) NOT NULL,
+        address TEXT NOT NULL,
+        latitude DECIMAL(10,8) NOT NULL,
+        longitude DECIMAL(11,8) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
 // Add distance_miles column to rides table
     await client.query(`
       ALTER TABLE rides ADD COLUMN IF NOT EXISTS distance_miles DECIMAL(10,2) DEFAULT 0;

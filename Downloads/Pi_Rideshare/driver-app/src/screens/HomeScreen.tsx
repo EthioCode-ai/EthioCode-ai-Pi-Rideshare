@@ -17,13 +17,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import driverService from '../services/driver.service';
 import socketService from '../services/socket.service';
 import RideRequestModal, { RideRequestData } from '../components/RideRequestModal';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native'
+import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MainStackParamList } from '../navigation/RootNavigator';
 import { ActiveRide, TripStatus } from '../types/ride.types';
 import { API_BASE_URL } from '../config/api.config';
 import SurgeOverlay from '../components/SurgeOverlay';
 import { StorageKeys } from '../constants/StorageKeys';
+
 
 // Performance data interface
 interface PerformanceData {
@@ -69,6 +70,7 @@ const HomeScreen: React.FC = () => {
   const headingRef = useRef<number>(0);
   const [isOnline, setIsOnline] = useState(false);
   const isOnlineRef = useRef(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [rideRequest, setRideRequest] = useState<RideRequestData | null>(null);
   const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -86,10 +88,14 @@ const HomeScreen: React.FC = () => {
   const [currentRideInfo, setCurrentRideInfo] = useState<{riderId: string; riderName: string; rideId: string} | null>(null);
   const route = useRoute<RouteProp<MainStackParamList, 'Home'>>();
   const [airportLots, setAirportLots] = useState<Array<{
-    code: string;
+    id: string;
+    airportCode: string;
+    airportName: string;
     name: string;
     lat: number;
     lng: number;
+    pickup: { lat: number; lng: number; name: string } | null;
+    dropoff: { lat: number; lng: number; name: string } | null;
     queueSize: number;
     queueByVehicleType: { economy: number; standard: number; xl: number; premium: number };
   }>>([]);
@@ -183,9 +189,27 @@ useEffect(() => {
 // Handle stayOnline param (from cancellation)
 useEffect(() => {
   if (route.params?.stayOnline) {
-    setIsOnline(true);
+    const timer = setTimeout(() => {
+      try {
+        setIsOnline(true);
+        isOnlineRef.current = true;
+        if (user?.id && locationRef.current?.latitude) {
+          socketService.connect(user.id);
+          socketService.driverConnect({
+            driverId: user.id,
+            location: {
+              lat: locationRef.current.latitude,
+              lng: locationRef.current.longitude,
+            },
+          });
+        }
+      } catch (e) {
+        console.log('stayOnline error:', e);
+      }
+    }, 2000);
+    return () => clearTimeout(timer);
   }
-}, [route.params?.stayOnline]);
+}, [route.params?.stayOnline, user]);
 
 // Keep screen awake while online
 
@@ -329,7 +353,11 @@ const fetchSurgeZones = async () => {
 // Fetch airport lots on mount
 useEffect(() => {
   fetchAirportLots();
-}, []);
+  if (isOnline) {
+    const interval = setInterval(fetchAirportLots, 15000);
+    return () => clearInterval(interval);
+  }
+}, [isOnline]);
 
 // Poll airport queue when online
 useEffect(() => {
@@ -573,17 +601,21 @@ const toggleOnlineStatus = async () => {
   }
 };
 
-  // Handle ride request accept
-  const handleAcceptRide = (rideId: string, routeData: any) => {
+const handleAcceptRide = (rideId: string, routeData: any) => {
     console.log('✅ Accepting ride:', rideId);
+    
+    // 1. MEASURE: Hide the HomeScreen map IMMEDIATELY.
+    // This triggers the !isNavigating guard to unmount the MapView hardware.
+    setIsNavigating(true);
     
     if (!rideRequest) {
       console.error('No ride request data available');
+      setIsNavigating(false);
       return;
     }
     
-      
-    // Transform RideRequestData → ActiveRide
+    // 2. Build the activeRide object
+    // We map the routeData specifically to ensure ActiveRide has the correct ETA
     const activeRide: ActiveRide = {
       rideId: rideRequest.rideId,
       status: 'en_route_to_pickup' as TripStatus,
@@ -605,38 +637,81 @@ const toggleOnlineStatus = async () => {
         lng: rideRequest.destination.lng || 0,
       },
       fare: {
-      estimated: rideRequest.estimatedFare,
-      currency: 'USD',
-      surgeMultiplier: rideRequest.surgeMultiplier,
-    },
-    distance: {
-      toPickup: {
-        miles: 0,
-        minutes: 0,
+        estimated: rideRequest.estimatedFare,
+        currency: 'USD',
+        surgeMultiplier: rideRequest.surgeMultiplier,
       },
-      toDestination: {
-        miles: rideRequest.estimatedDistance || 0,
-        minutes: rideRequest.estimatedDuration || 0,
+      distance: {
+        toPickup: {
+          miles: routeData?.toPickup?.distance?.miles || 0,
+          minutes: routeData?.toPickup?.duration?.minutes || 0,
+        },
+        toDestination: {
+          miles: routeData?.toDestination?.distance?.miles || rideRequest.estimatedDistance || 0,
+          minutes: routeData?.toDestination?.duration?.minutes || rideRequest.estimatedDuration || 0,
+        },
       },
-    },
-    acceptedAt: new Date().toISOString(),
+      acceptedAt: new Date().toISOString(),
+    };
+    
+    // 3. Clear the request state (Closes the Modal)
+    setRideRequest(null);
+    
+    // 4. THE FINAL CUT: Wait for UI/Native cleanup
+    setTimeout(() => {
+  // 5. NETWORK: Notify the server BEFORE the screen transition
+  if (socketService && user?.id) {
+    socketService.acceptRide(user.id, rideId);
+    console.log('📡 Socket acceptRide emitted for ride:', rideId);
+  }
+  
+  // Reset the stack to kill the HomeScreen Map fragment completely
+  navigation.dispatch(
+    CommonActions.reset({
+      index: 0,
+      routes: [
+        {
+          name: 'ActiveRide',
+          params: { ride: activeRide, routeData: routeData }
+        },
+      ],
+    })
+  );
+}, 500);
   };
   
-  // Clear the modal
-  setRideRequest(null);
   
-// Navigate to ActiveRideScreen
-navigation.navigate('ActiveRide', { ride: activeRide, routeData });
-
- // Emit acceptance via socket AFTER navigation
-socketService.acceptRide(user?.id || '', rideId);
- };  
-
-
-
-// Handle ride request decline
-const handleDeclineRide = (rideId: string) => {
+  
+    // Handle ride request decline
+const handleDeclineRide = async (rideId: string) => {
   console.log('❌ Declining ride:', rideId);
+
+  // 1. KILL THE GHOST VOICE & MAP LINE
+  // @ts-ignore - This silences the persistent squiggles on the variable below
+  const nav: any = navigationController;
+
+  if (nav) {
+    try {
+      // Use the 'nav' alias for everything to keep the compiler happy
+      if (typeof nav.stopGuidance === 'function') {
+        await nav.stopGuidance();
+      }
+      
+      if (typeof nav.clearDestinations === 'function') {
+        await nav.clearDestinations();
+      }
+      
+      if (typeof nav.setNavigationEnabled === 'function') {
+        await nav.setNavigationEnabled(false);
+      }
+
+      console.log('🛑 Native Navigation engine stopped and cleared');
+    } catch (err) {
+      console.error('Error stopping navigation on decline:', err);
+    }
+  }
+
+  // 2. EXISTING LOGIC
   socketService.rejectRide(user?.id || '', rideId);
   setRideRequest(null);
 };
@@ -797,28 +872,31 @@ const openChat = () => {
   return (<>
     <TouchableWithoutFeedback onPress={() => headerExpanded && setHeaderExpanded(false)}>
       <View style={styles.container}>
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_GOOGLE}
-          style={styles.map}
-          customMapStyle={[
-              { "elementType": "geometry", "stylers": [{ "color": "#ebebeb" }] },
-              { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9d6df" }] },
-              { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
-              { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#d4d4d4" }] },
-              { "elementType": "labels.text.fill", "stylers": [{ "color": "#6b6b6b" }] },
-              { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] },
-              { "featureType": "poi", "stylers": [{ "visibility": "on" }] },
-              { "featureType": "transit", "stylers": [{ "visibility": "off" }] }
-           ]}
-          initialRegion={{
-            latitude: location.latitude,
-            longitude: location.longitude,
-            latitudeDelta: 0.005,
-            longitudeDelta: 0.005,
+       {!isNavigating && (
+  <MapView
+    ref={mapRef}
+    provider={PROVIDER_GOOGLE} // 1. CRITICAL: Use Google engine for SDK compatibility
+    style={styles.map}
+    showsUserLocation={true}    // 2. FIX: This draws the car/blue dot
+    followsUserLocation={true}  // 3. FIX: This snaps camera to car on start
+    showsMyLocationButton={true} // 4. FIX: Adds the "center on me" button
+    customMapStyle={[
+      { "elementType": "geometry", "stylers": [{ "color": "#ebebeb" }] },
+      { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9d6df" }] },
+      { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#ffffff" }] },
+      { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#d4d4d4" }] },
+      { "elementType": "labels.text.fill", "stylers": [{ "color": "#6b6b6b" }] },
+      { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] },
+      { "featureType": "poi", "stylers": [{ "visibility": "on" }] },
+      { "featureType": "transit", "stylers": [{ "visibility": "off" }] }
+    ]}
+    initialRegion={{
+      latitude: location.latitude,
+      longitude: location.longitude,
+      latitudeDelta: 0.005,
+      longitudeDelta: 0.005,
           }}
-          showsUserLocation={false}
-          showsMyLocationButton={false}
+               
           showsCompass={true}
           showsTraffic={false}
           zoomEnabled={true}           // ← ADD THIS
@@ -832,7 +910,7 @@ const openChat = () => {
           {/* Map ALSO rotates by same amount, so car appears to point UP on screen */}
           {/* Car image front points UP = 0°, adjust CAR_ROTATION_OFFSET if needed */}
           <SurgeOverlay zones={surgeZones} />
-         <Marker
+         {location && location.latitude && <Marker
   coordinate={{
     latitude: location.latitude,
     longitude: location.longitude,
@@ -849,15 +927,15 @@ const openChat = () => {
     }}
     resizeMode="contain"
   />
-        </Marker>
+        </Marker>}
           
           {/* Airport Rideshare Lot Markers */}
           {airportLots.map((lot) => (
             <Marker
-              key={lot.code}
+              key={lot.id}
               coordinate={{ latitude: lot.lat, longitude: lot.lng }}
               anchor={{ x: 0.5, y: 0.5 }}
-              onPress={() => setSelectedLot(selectedLot === lot.code ? null : lot.code)}
+              onPress={() => setSelectedLot(selectedLot === lot.id ? null : lot.id)}
             >
               <View style={styles.airportLotMarker}>
                 <Text style={styles.airportLotText}>P</Text>
@@ -866,13 +944,19 @@ const openChat = () => {
             </Marker>
           ))}
         </MapView>
+        )}
         
         {/* Airport Lot Queue Modal */}
         {selectedLot && (
+          <TouchableOpacity 
+            style={styles.lotQueueOverlay} 
+            activeOpacity={1} 
+            onPress={() => setSelectedLot(null)}
+          >
           <View style={styles.lotQueueModal}>
             <View style={styles.lotQueueHeader}>
               <Text style={styles.lotQueueTitle}>
-                {airportLots.find(l => l.code === selectedLot)?.name}
+                {airportLots.find(l => l.id === selectedLot)?.name}
               </Text>
               <TouchableOpacity onPress={() => setSelectedLot(null)}>
                 <Text style={styles.lotQueueClose}>✕</Text>
@@ -882,22 +966,23 @@ const openChat = () => {
             <View style={styles.lotQueueGrid}>
               <View style={styles.lotQueueItem}>
                 <Text style={styles.lotQueueType}>Economy</Text>
-                <Text style={styles.lotQueueCount}>-</Text>
+                <Text style={styles.lotQueueCount}>{airportLots.find(l => l.id === selectedLot)?.queueByVehicleType?.economy ?? 0}</Text>
               </View>
               <View style={styles.lotQueueItem}>
                 <Text style={styles.lotQueueType}>Standard</Text>
-                <Text style={styles.lotQueueCount}>-</Text>
+                <Text style={styles.lotQueueCount}>{airportLots.find(l => l.id === selectedLot)?.queueByVehicleType?.standard ?? 0}</Text>
               </View>
               <View style={styles.lotQueueItem}>
                 <Text style={styles.lotQueueType}>XL</Text>
-                <Text style={styles.lotQueueCount}>-</Text>
+                <Text style={styles.lotQueueCount}>{airportLots.find(l => l.id === selectedLot)?.queueByVehicleType?.xl ?? 0}</Text>
               </View>
               <View style={styles.lotQueueItem}>
                 <Text style={styles.lotQueueType}>Premium</Text>
-                <Text style={styles.lotQueueCount}>-</Text>
+                <Text style={styles.lotQueueCount}>{airportLots.find(l => l.id === selectedLot)?.queueByVehicleType?.premium ?? 0}</Text>
               </View>
             </View>
           </View>
+          </TouchableOpacity>
         )}
 
         {/* Expandable Header Bar */}
@@ -1060,35 +1145,39 @@ const openChat = () => {
          <Text style={styles.floatingButtonText}>💬</Text>
        </TouchableOpacity>
        {/* TEST BUTTON - Remove before production */}
-  {isOnline && (
-    <TouchableOpacity 
-      style={[styles.floatingButton, { backgroundColor: '#F59E0B' }]}
-      onPress={() => {
-        setRideRequest({
-          rideId: 'test-' + Date.now(),
-          riderId: 'test-rider',
-          riderName: 'Tolbert Dunkin',
-          riderRating: 4.8,
-         pickup: {
-          address: 'Onyx Coffee Shop, SE 2nd St, Bentonville, AR',
-          lat: 36.3731,
-          lng: -94.2093,
-       },
-         destination: {
-          address: '21C Museum Hotel, Bentonville, AR',
-          lat: 36.3741,
-          lng: -94.2081,
-       },
-          estimatedFare: 8.50,
-          estimatedDistance: 0.3,
-          estimatedDuration: 2,
-          surgeMultiplier: 1.0,
-  });
-      }}
-    >
-      <Text style={styles.floatingButtonText}>🧪</Text>
-    </TouchableOpacity>
-  )}  
+    {isOnline && (
+      <TouchableOpacity 
+        style={[styles.floatingButton, { backgroundColor: '#F59E0B' }]}
+        onPress={() => {
+          // 1. MEASURE: Create the test request
+          const testRequest = {
+            rideId: 'test-' + Date.now(),
+            riderId: 'test-rider',
+            riderName: 'Tolbert Dunkin',
+            riderRating: 4.8,
+            pickup: {
+              address: 'Onyx Coffee Shop, SE 2nd St, Bentonville, AR',
+              lat: 36.3731,
+              lng: -94.2093,
+            },
+            destination: {
+              address: '21C Museum Hotel, Bentonville, AR',
+              lat: 36.3741,
+              lng: -94.2081,
+            },
+            estimatedFare: 8.50,
+            estimatedDistance: 0.3,
+            estimatedDuration: 2,
+            surgeMultiplier: 1.0,
+          };
+
+          // 2. TRIGGER: Show the modal via state
+          setRideRequest(testRequest as any);
+        }}
+      >
+        <Text style={styles.floatingButtonText}>🧪</Text>
+      </TouchableOpacity>
+    )}
         
 </View>
   {/* Chat Quick Options */}
@@ -1677,6 +1766,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+
+  lotQueueOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   lotQueueModal: {
     position: 'absolute',
     bottom: 200,
@@ -1738,3 +1838,4 @@ const styles = StyleSheet.create({
 });
 
 export default HomeScreen;
+

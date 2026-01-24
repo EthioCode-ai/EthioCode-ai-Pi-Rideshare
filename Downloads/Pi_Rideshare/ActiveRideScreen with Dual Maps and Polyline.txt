@@ -1,0 +1,20 @@
+PS C:\Users\abiys\Downloads\Pi_Rideshare\driver-app\android> Get-Content "C:\Users\abiys\Downloads\Pi_Rideshare\driver-app\src\screens\ActiveRideScreen.tsx" | Select-String "setNavViewController|navViewController" -Context 1,1
+
+    const [isLoading, setIsLoading] = useState(false);
+>   const [navViewController, setNavViewController] = useState<any>(null);
+    const [mapViewController, setMapViewController] = useState<any>(null);
+    useEffect(() => {
+>     if (isPreparingNav || !navigationController || !navViewController) {
+        console.warn('ðŸ”· [WithSDK] No navigationController - skipping SDK init');
+      };
+>  }, [isPreparingNav, navigationController, navViewController, addListeners, removeListeners]);
+
+              console.log('ðŸ—ºï¸ NavigationViewController created');
+>             setNavViewController(controller);
+            }}
+              console.log('ðŸ—ºï¸ NavigationViewController created');
+>             setNavViewController(controller);
+            }}
+
+
+PS C:\Users\abiys\Downloads\Pi_Rideshare\driver-app\android>

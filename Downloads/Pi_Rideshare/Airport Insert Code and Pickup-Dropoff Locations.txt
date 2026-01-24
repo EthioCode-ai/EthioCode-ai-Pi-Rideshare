@@ -1,0 +1,113 @@
+WITH new_airport AS (
+  INSERT INTO airport_zones (
+    airport_code,
+    airport_name,
+    latitude,
+    longitude,
+    geofence_radius_km,
+    airport_fee,
+    queue_enabled
+  ) VALUES (
+    'IAD',
+    'Washington Dulles International Airport',
+    38.9531,
+    -77.4565,
+    3.0,
+    5.00,
+    true
+  ) RETURNING id
+),
+pickup_insert AS (
+  INSERT INTO airport_pickup_zones (airport_zone_id, zone_code, zone_name, door_location, latitude, longitude)
+  SELECT id, zone_code, zone_name, door_location, lat, lng
+  FROM new_airport,
+  (VALUES
+    ('3A', 'Zone 3A', 'Door 2', 38.9536350, -77.4466690),
+    ('3B', 'Zone 3B', 'Door 2', 38.9536350, -77.4466690),
+    ('3C', 'Zone 3C', 'Door 4', 38.9536160, -77.4475950),
+    ('3D', 'Zone 3D', 'Door 4', 38.9536160, -77.4475950),
+    ('3E', 'Zone 3E', 'Door 4', 38.9536160, -77.4475950),
+    ('3F', 'Zone 3F', 'Door 4', 38.9536160, -77.4475950),
+    ('3G', 'Zone 3G', 'Door 6', 38.9536650, -77.4489220),
+    ('3H', 'Zone 3H', 'Door 6', 38.9536650, -77.4489220)
+  ) AS zones(zone_code, zone_name, door_location, lat, lng)
+  RETURNING 1
+)
+INSERT INTO airport_dropoff_zones (airport_zone_id, zone_code, zone_name, latitude, longitude)
+SELECT id, 'D1', 'Main Dropoff Zone', 38.9536350, -77.4489220
+FROM new_airport;
+
+
+------=======INSERT PICKUP ZONES============
+
+INSERT INTO airport_pickup_zones (airport_zone_id, zone_code, zone_name, door_location, latitude, longitude) VALUES
+('3635f515-7fbd-4b71-a54b-5d91df613004', '3A', 'Zone 3A', 'Door 2', 38.9536350, -77.4466690),
+('3635f515-7fbd-4b71-a54b-5d91df613004', '3B', 'Zone 3B', 'Door 2', 38.9536350, -77.4466690),
+('3635f515-7fbd-4b71-a54b-5d91df613004', '3C', 'Zone 3C', 'Door 4', 38.9536160, -77.4475950),
+('3635f515-7fbd-4b71-a54b-5d91df613004', '3D', 'Zone 3D', 'Door 4', 38.9536160, -77.4475950),
+('3635f515-7fbd-4b71-a54b-5d91df613004', '3E', 'Zone 3E', 'Door 4', 38.9536160, -77.4475950),
+('3635f515-7fbd-4b71-a54b-5d91df613004', '3F', 'Zone 3F', 'Door 4', 38.9536160, -77.4475950),
+('3635f515-7fbd-4b71-a54b-5d91df613004', '3G', 'Zone 3G', 'Door 6', 38.9536650, -77.4489220),
+('3635f515-7fbd-4b71-a54b-5d91df613004', '3H', 'Zone 3H', 'Door 6', 38.9536650, -77.4489220);
+
+ALTER TABLE airport_pickup_zones 
+ADD CONSTRAINT unique_pickup_zone UNIQUE (airport_zone_id, zone_code);
+
+-----========INSERT DROPOFF ZONES==========================================================
+
+INSERT INTO airport_dropoff_zones (airport_zone_id, zone_code, zone_name, latitude, longitude) VALUES
+('3635f515-7fbd-4b71-a54b-5d91df613004', 'D1', 'Main Dropoff Zone', 38.9536350, -77.4489220);
+
+ALTER TABLE airport_pickup_zones 
+ADD CONSTRAINT unique_pickup_zone UNIQUE (airport_zone_id, zone_code);
+
+
+----============VERIFY DATA INSERTION========================================================
+
+SELECT zone_code, zone_name, door_location, latitude, longitude 
+FROM airport_pickup_zones 
+WHERE airport_zone_id = '3635f515-7fbd-4b71-a54b-5d91df613004'
+ORDER BY zone_code;
+
+
+-----==========Join QUERY======================================================================
+
+SELECT 
+  az.airport_code,
+  az.airport_name,
+  pz.zone_code,
+  pz.door_location,
+  pz.latitude,
+  pz.longitude
+FROM airport_zones az
+JOIN airport_pickup_zones pz ON az.id = pz.airport_zone_id
+WHERE az.airport_code = 'IAD'
+ORDER BY pz.zone_code;
+
+=======================================================================================================================
+=======================================================================================================================
+
+Airport Pickup Zones
+
+IAD 
+Pickup       Location    Coordinates
+Zone 3A       Door 2  
+Zone 3B       Door 2  38.953635, -77.446669
+Zone 3C       Door 4  38.953616, -77.447595
+Zone 3D       Door 4  38.953616, -77.447595
+Zone 3E       Door 4  38.953616, -77.447595
+Zone 3F       Door 4  38.953616, -77.447595
+Zone 3G       Door 6  38.953665, -77.448922
+Zone 3H       Door 6  38.953665, -77.448922
+
+Dropoff 
+
+Zone: 38.953635, -77.448922
+
+
+
+Terminal 1:           38.84973, -77.04166
+Terminal 2: Zone 1-4: 38.85401, -77.04377
+
+Waiting Lot: 38.848426, -77.043546 (2701 Thomas Ave, Arlington, VA 22202)
+ 

@@ -14,6 +14,13 @@ export interface Location {
   longitude: number;
   address?: string;
   name?: string;
+  // Airport fields (optional - only populated for airport pickups/dropoffs)
+  isAirport?: boolean;
+  airportCode?: string;
+  airportName?: string;
+  zoneCode?: string;
+  zoneName?: string;
+  doorLocation?: string;
 }
 
 export interface SavedPlace {

@@ -22,6 +22,68 @@ const COLORS = {
   destination: '#EF4444',
 };
 
+// Helper: Calculate distance from point to line segment
+const distanceToSegment = (
+  point: { latitude: number; longitude: number },
+  segStart: { latitude: number; longitude: number },
+  segEnd: { latitude: number; longitude: number }
+): { distance: number; closestPoint: { latitude: number; longitude: number } } => {
+  const dx = segEnd.longitude - segStart.longitude;
+  const dy = segEnd.latitude - segStart.latitude;
+  
+  if (dx === 0 && dy === 0) {
+    // Segment is a point
+    return {
+      distance: Math.sqrt(
+        Math.pow(point.latitude - segStart.latitude, 2) +
+        Math.pow(point.longitude - segStart.longitude, 2)
+      ),
+      closestPoint: segStart
+    };
+  }
+  
+  // Calculate projection of point onto line segment
+  const t = Math.max(0, Math.min(1, 
+    ((point.longitude - segStart.longitude) * dx + (point.latitude - segStart.latitude) * dy) / 
+    (dx * dx + dy * dy)
+  ));
+  
+  const closestPoint = {
+    latitude: segStart.latitude + t * dy,
+    longitude: segStart.longitude + t * dx
+  };
+  
+  const distance = Math.sqrt(
+    Math.pow(point.latitude - closestPoint.latitude, 2) +
+    Math.pow(point.longitude - closestPoint.longitude, 2)
+  );
+  
+  return { distance, closestPoint };
+};
+
+// Helper: Snap a point to the nearest position on a polyline
+const snapToPolyline = (
+  point: { latitude: number; longitude: number },
+  polyline: Coordinate[]
+): { latitude: number; longitude: number } => {
+  if (polyline.length === 0) return point;
+  if (polyline.length === 1) return polyline[0];
+  
+  let minDistance = Infinity;
+  let snappedPoint = point;
+  
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const { distance, closestPoint } = distanceToSegment(point, polyline[i], polyline[i + 1]);
+    if (distance < minDistance) {
+      minDistance = distance;
+      snappedPoint = closestPoint;
+    }
+  }
+  
+  return snappedPoint;
+};
+
+
 // Map style (same as HomeScreen)
 const MAP_STYLE = [
   { "elementType": "geometry", "stylers": [{ "color": "#ebebeb" }] },
@@ -95,7 +157,7 @@ const RouteMapView = forwardRef<RouteMapViewRef, RouteMapViewProps>(({
         heading: heading,
         pitch: 60,
         zoom: 19,
-      }, { duration: 500 });
+      }, { duration: 400 });
     },
   }));
 
@@ -114,7 +176,7 @@ const RouteMapView = forwardRef<RouteMapViewRef, RouteMapViewProps>(({
         heading: heading,
         pitch: 60,
         zoom: 19,
-      }, { duration: 500 });
+      }, { duration: 400 });
     }
   }, [driverLocation?.latitude, driverLocation?.longitude, heading, tripStatus]);
 
@@ -161,6 +223,14 @@ const RouteMapView = forwardRef<RouteMapViewRef, RouteMapViewProps>(({
       // Driver is far from route - show full route
       return routeCoordinates;
     }
+  }, [driverLocation?.latitude, driverLocation?.longitude, routeCoordinates]);
+
+  // Calculate snapped car position (for display only)
+  const snappedCarPosition = useMemo(() => {
+    if (!driverLocation || routeCoordinates.length < 2) {
+      return driverLocation;
+    }
+    return snapToPolyline(driverLocation, routeCoordinates);
   }, [driverLocation?.latitude, driverLocation?.longitude, routeCoordinates]);
 
   // Get initial region
@@ -222,10 +292,11 @@ const RouteMapView = forwardRef<RouteMapViewRef, RouteMapViewProps>(({
         {/* Driver marker */}
         {driverLocation && (
           <Marker
-            coordinate={{
-              latitude: driverLocation.latitude,
-              longitude: driverLocation.longitude,
-            }}
+            coordinate={
+              routeCoordinates.length >= 2
+                ? snapToPolyline(driverLocation, routeCoordinates)
+                : { latitude: driverLocation.latitude, longitude: driverLocation.longitude }
+            }
             anchor={{ x: 0.5, y: 0.5 }}
             flat={false}
             rotation={CAR_ROTATION_OFFSET}

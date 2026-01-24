@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import API_BASE_URL from '../config/api.config';
 
 const SafetyScreen = () => {
   const { colors, isDark } = useTheme();
@@ -12,6 +14,30 @@ const SafetyScreen = () => {
 
   const [emergencyContact, setEmergencyContact] = useState('');
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Load emergency contact from profile
+  useEffect(() => {
+    const loadEmergencyContact = async () => {
+      try {
+        const token = await AsyncStorage.getItem('authToken');
+        const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.emergencyContact) {
+            setEmergencyContact(data.emergencyContact);
+          }
+        }
+      } catch (error) {
+        console.log('Could not load emergency contact:', error);
+      }
+    };
+    loadEmergencyContact();
+  }, []);
 
   const handleCall911 = () => {
     Alert.alert(
@@ -32,9 +58,32 @@ const SafetyScreen = () => {
     Linking.openURL(`tel:${emergencyContact}`);
   };
 
-  const handleSaveEmergencyContact = () => {
-    setEditing(false);
-    Alert.alert('Saved', 'Emergency contact updated.');
+  const handleSaveEmergencyContact = async () => {
+    setSaving(true);
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          emergencyContact: emergencyContact.trim(),
+        }),
+      });
+
+      if (response.ok) {
+        setEditing(false);
+        Alert.alert('Saved', 'Emergency contact updated.');
+      } else {
+        Alert.alert('Error', 'Could not save emergency contact.');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Network error. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const styles = StyleSheet.create({
@@ -228,8 +277,12 @@ const SafetyScreen = () => {
                   placeholderTextColor={isDark ? '#666666' : '#999999'}
                   keyboardType="phone-pad"
                 />
-                <TouchableOpacity style={styles.cardButton} onPress={handleSaveEmergencyContact}>
-                  <Text style={styles.cardButtonText}>Save Contact</Text>
+                <TouchableOpacity 
+                  style={[styles.cardButton, saving && { opacity: 0.6 }]} 
+                  onPress={handleSaveEmergencyContact}
+                  disabled={saving}
+                >
+                  <Text style={styles.cardButtonText}>{saving ? 'Saving...' : 'Save Contact'}</Text>
                 </TouchableOpacity>
               </>
             ) : (

@@ -3886,6 +3886,117 @@ app.post('/api/users/:userId/setup-intent', authenticateToken, async (req, res) 
   }
 });
 
+// ==================== SAVED PLACES ENDPOINTS ====================
+
+// Get all saved places for a user
+app.get('/api/rider/:userId/saved-places', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (req.user.userId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const result = await db.query(`
+      SELECT id, name, label, address, latitude, longitude, created_at
+      FROM saved_places
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+    `, [userId]);
+    
+    res.json({ places: result.rows });
+  } catch (error) {
+    console.error('Get saved places error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Add a new saved place
+app.post('/api/rider/:userId/saved-places', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { name, label, address, latitude, longitude } = req.body;
+    
+    if (req.user.userId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    if (!name || !label || !address || !latitude || !longitude) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    const result = await db.query(`
+      INSERT INTO saved_places (user_id, name, label, address, latitude, longitude)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, name, label, address, latitude, longitude, created_at
+    `, [userId, name, label, address, latitude, longitude]);
+    
+    res.status(201).json({ place: result.rows[0] });
+  } catch (error) {
+    console.error('Add saved place error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update a saved place
+app.put('/api/rider/:userId/saved-places/:placeId', authenticateToken, async (req, res) => {
+  try {
+    const { userId, placeId } = req.params;
+    const { name, label, address, latitude, longitude } = req.body;
+    
+    if (req.user.userId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const result = await db.query(`
+      UPDATE saved_places
+      SET name = COALESCE($1, name),
+          label = COALESCE($2, label),
+          address = COALESCE($3, address),
+          latitude = COALESCE($4, latitude),
+          longitude = COALESCE($5, longitude),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $6 AND user_id = $7
+      RETURNING id, name, label, address, latitude, longitude, updated_at
+    `, [name, label, address, latitude, longitude, placeId, userId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Place not found' });
+    }
+    
+    res.json({ place: result.rows[0] });
+  } catch (error) {
+    console.error('Update saved place error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete a saved place
+app.delete('/api/rider/:userId/saved-places/:placeId', authenticateToken, async (req, res) => {
+  try {
+    const { userId, placeId } = req.params;
+    
+    if (req.user.userId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const result = await db.query(`
+      DELETE FROM saved_places
+      WHERE id = $1 AND user_id = $2
+      RETURNING id
+    `, [placeId, userId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Place not found' });
+    }
+    
+    res.json({ success: true, deletedId: placeId });
+  } catch (error) {
+    console.error('Delete saved place error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Add digital wallet endpoint
 app.post('/api/users/:userId/digital-wallet', authenticateToken, async (req, res) => {
   try {

@@ -1,0 +1,7 @@
+﻿node_modules/
+.expo/
+dist/
+AppData/
+*.log
+*.odl
+*.aodl

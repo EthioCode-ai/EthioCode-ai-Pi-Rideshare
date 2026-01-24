@@ -1,20 +1,23 @@
 import React from 'react';
 import { StatusBar } from 'react-native';
-// TODO: Re-enable after rebuilding development build with native modules
-// import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { NavigationProvider } from '@googlemaps/react-native-navigation-sdk';
 import RootNavigator from './src/navigation/RootNavigator';
 
 export default function App() {
   console.log('App starting with authentication...');
-  
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      {/* TODO: Re-enable SafeAreaProvider after running: npx expo prebuild --clean && npx expo run:android */}
-      {/* <SafeAreaProvider> */}
+      {/* NavigationProvider MUST wrap screens that use useGoogleNav() hook */}
+      <NavigationProvider
+        termsAndConditionsDialogOptions={{
+          title: 'Pi VIP Navigation',
+          companyName: 'Pi VIP Rideshare',
+        }}
+      >
         <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
         <RootNavigator />
-      {/* </SafeAreaProvider> */}
+      </NavigationProvider>
     </GestureHandlerRootView>
   );
 }

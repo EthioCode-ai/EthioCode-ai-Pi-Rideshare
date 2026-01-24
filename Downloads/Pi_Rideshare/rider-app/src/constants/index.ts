@@ -10,48 +10,40 @@ export const StorageKeys = {
 };
 
 export const VehicleTypes = {
-  EVERYDAY: 'everyday',
-  RELAX: 'relax',
+  ECONOMY: 'economy',
+  STANDARD: 'standard',
+  XL: 'xl',
   PREMIUM: 'premium',
-  BUSINESS: 'business',
-  FAMILY: 'family',
 };
 
 export const VehicleInfo = {
-  everyday: {
+  economy: {
     name: 'Everyday',
     icon: '🚗',
     description: 'Affordable rides for daily trips',
     capacity: 4,
     baseMultiplier: 1.0,
   },
-  relax: {
+  standard: {
     name: 'Relax',
     icon: '🚙',
     description: 'Extra legroom & comfort',
     capacity: 4,
     baseMultiplier: 1.3,
   },
-  premium: {
-    name: 'Premium',
+  xl: {
+    name: 'MAX',
     icon: '✨',
-    description: 'Luxury vehicles & top service',
-    capacity: 4,
+    description: 'SUVs & extra space',
+    capacity: 6,
     baseMultiplier: 2.0,
   },
-  business: {
-    name: 'Business',
+  premium: {
+    name: 'Premium / Business',
     icon: '🎩',
-    description: 'Professional drivers & executive cars',
+    description: 'Luxury vehicles & top service',
     capacity: 4,
     baseMultiplier: 2.5,
-  },
-  family: {
-    name: 'Family',
-    icon: '🚐',
-    description: 'SUVs & minivans for groups',
-    capacity: 6,
-    baseMultiplier: 1.8,
   },
 };
 

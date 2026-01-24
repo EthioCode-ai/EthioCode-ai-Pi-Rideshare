@@ -57,18 +57,32 @@ class RideService {
         method: 'POST',
         headers: await this.authHeaders(),
         body: JSON.stringify({
-          pickup: {
-          coordinates: { lat: pickup.latitude, lng: pickup.longitude },
-          address: pickup.address
-      },
-          destination: {
-          coordinates: { lat: destination.latitude, lng: destination.longitude },
-          address: destination.address
-      },
-          rideType: vehicleType,
-          paymentMethodId: paymentMethod,
-          riderPreferences: preferences,
-     }),
+  pickup: {
+    coordinates: { lat: pickup.latitude, lng: pickup.longitude },
+    address: pickup.address,
+    // Airport fields (only included if present)
+    isAirport: pickup.isAirport,
+    airportCode: pickup.airportCode,
+    airportName: pickup.airportName,
+    zoneCode: pickup.zoneCode,
+    zoneName: pickup.zoneName,
+    doorLocation: pickup.doorLocation,
+  },
+  destination: {
+    coordinates: { lat: destination.latitude, lng: destination.longitude },
+    address: destination.address,
+    // Airport fields (only included if present)
+    isAirport: destination.isAirport,
+    airportCode: destination.airportCode,
+    airportName: destination.airportName,
+    zoneCode: destination.zoneCode,
+    zoneName: destination.zoneName,
+    doorLocation: destination.doorLocation,
+  },
+  rideType: vehicleType,
+  paymentMethodId: paymentMethod,
+  riderPreferences: preferences,
+}),
       });
 
       const data = await response.json();

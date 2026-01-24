@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
+
+const NOTIFICATION_SETTINGS_KEY = 'notification_settings';
 
 const NotificationSettingsScreen = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
 
-  const [settings, setSettings] = useState({
+ const [settings, setSettings] = useState({
     rideUpdates: true,
     promotions: true,
     driverArrival: true,
@@ -18,6 +21,38 @@ const NotificationSettingsScreen = () => {
     sounds: true,
     vibration: true,
   });
+  const [loaded, setLoaded] = useState(false);
+
+  // Load settings from storage
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(NOTIFICATION_SETTINGS_KEY);
+        if (stored) {
+          setSettings(JSON.parse(stored));
+        }
+      } catch (error) {
+        console.log('Could not load notification settings:', error);
+      } finally {
+        setLoaded(true);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  // Save settings when changed
+  useEffect(() => {
+    if (loaded) {
+      const saveSettings = async () => {
+        try {
+          await AsyncStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify(settings));
+        } catch (error) {
+          console.log('Could not save notification settings:', error);
+        }
+      };
+      saveSettings();
+    }
+  }, [settings, loaded]);
 
   const toggleSetting = (key: keyof typeof settings) => {
     setSettings(prev => ({ ...prev, [key]: !prev[key] }));

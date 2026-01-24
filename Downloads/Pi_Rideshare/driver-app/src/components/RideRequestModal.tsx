@@ -21,6 +21,7 @@ import {
   Vibration,
 } from 'react-native';
 import { API_BASE_URL } from '../config/api.config';
+import { Audio } from 'expo-av';
 
 export interface RideRequestData {
   rideId: string;
@@ -31,11 +32,25 @@ export interface RideRequestData {
     address: string;
     lat?: number;
     lng?: number;
+    // Airport fields
+    isAirport?: boolean;
+    airportCode?: string;
+    airportName?: string;
+    zoneCode?: string;
+    zoneName?: string;
+    doorLocation?: string;
   };
   destination: {
     address: string;
     lat?: number;
     lng?: number;
+    // Airport fields
+    isAirport?: boolean;
+    airportCode?: string;
+    airportName?: string;
+    zoneCode?: string;
+    zoneName?: string;
+    doorLocation?: string;
   };
   estimatedFare: number;
   estimatedDistance?: number;
@@ -66,6 +81,37 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
   const progressAnim = useRef(new Animated.Value(1)).current;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  
+  // Play chime sound when request arrives
+  const playChime = async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+      });
+      
+      const { sound } = await Audio.Sound.createAsync(
+        require('../assets/sounds/ride-request.mp3')
+      );
+      await sound.playAsync();
+      
+      sound.setOnPlaybackStatusUpdate((status: any) => {
+        if (status.isLoaded && status.didJustFinish) {
+          sound.unloadAsync();
+        }
+      });
+    } catch (error) {
+      console.log('Chime error:', error);
+      Vibration.vibrate([0, 500, 200, 500]);
+    }
+  };
+
+  useEffect(() => {
+    if (visible) {
+      playChime();
+    }
+  }, [visible]);
 
   // Fetch route from driver to pickup
   useEffect(() => {
@@ -150,9 +196,17 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
       
 
   const handleAccept = () => {
+    // 1. Stop all timers and animations immediately to freeze the UI
     if (timerRef.current) clearInterval(timerRef.current);
     if (animationRef.current) animationRef.current.stop();
-    if (request) onAccept(request.rideId, routeData);
+
+    // 2. MEASURE: We wait 400ms for the Modal's native clean-up 
+    // This prevents the Google SDK and the Modal from fighting over the UI thread.
+    setTimeout(() => {
+      if (request) {
+        onAccept(request.rideId, routeData);
+      }
+    }, 400); 
   };
 
   const handleDecline = () => {
@@ -203,31 +257,20 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
             </View>
           </View>
 
-          {/* Rider Info */}
-          {request.riderName && (
-            <View style={styles.riderInfo}>
-              <View style={styles.riderAvatar}>
-                <Text style={styles.riderInitial}>
-                  {request.riderName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-              <View>
-                <Text style={styles.riderName}>{request.riderName}</Text>
-                {request.riderRating && (
-                  <Text style={styles.riderRating}>
-                    ⭐ {request.riderRating.toFixed(1)}
-                  </Text>
-                )}
-              </View>
-            </View>
-          )}
-
-          {/* Ride Details */}
-          <View style={styles.routeContainer}>
-            {/* Pickup */}
+          {/* Pickup */}
             <View style={styles.locationRow}>
               <View style={[styles.locationDot, styles.pickupDot]} />
               <View style={styles.locationInfo}>
+                {request.pickup.isAirport && (
+                  <View style={styles.airportBadge}>
+                    <Text style={styles.airportBadgeText}>AIRPORT PICKUP</Text>
+                    <Text style={styles.airportDetails}>
+                      {request.pickup.airportCode || ''}
+                      {request.pickup.zoneCode ? ' - ' + request.pickup.zoneCode : ''}
+                      {request.pickup.doorLocation ? ' - ' + request.pickup.doorLocation : ''}
+                    </Text>
+                  </View>
+                )}
                 <Text style={styles.locationLabel}>PICKUP</Text>
                 <Text style={styles.locationAddress} numberOfLines={2}>
                   {request.pickup.address}
@@ -235,13 +278,15 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
                 {loadingRoute ? (
                   <Text style={styles.distanceText}>Calculating...</Text>
                 ) : routeData ? (
-                 <Text style={styles.distanceText}>
-                 {routeData.toPickup.distance.miles.toFixed(1)} mi away ({routeData.toPickup.duration.minutes} min)
-                 </Text>
-                 ) : null}
+                  <Text style={styles.distanceText}>
+                    {routeData.toPickup.distance.miles.toFixed(1)} mi away ({routeData.toPickup.duration.minutes} min)
+                  </Text>
+                ) : null}
               </View>
             </View>
+          
 
+        
             {/* Line connector */}
             <View style={styles.connector} />
 
@@ -249,18 +294,27 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
             <View style={styles.locationRow}>
               <View style={[styles.locationDot, styles.destinationDot]} />
               <View style={styles.locationInfo}>
+                {request.destination.isAirport && (
+                  <View style={styles.airportBadgeDropoff}>
+                    <Text style={styles.airportBadgeText}>AIRPORT DROPOFF</Text>
+                    <Text style={styles.airportDetails}>
+                      {request.destination.airportCode || ''}
+                      {request.destination.zoneCode ? ' - ' + request.destination.zoneCode : ''}
+                    </Text>
+                  </View>
+                )}
                 <Text style={styles.locationLabel}>DROPOFF</Text>
                 <Text style={styles.locationAddress} numberOfLines={2}>
                   {request.destination.address}
                 </Text>
-               {routeData?.toDestination && (
-               <Text style={styles.tripDistanceText}>
-               {routeData.toDestination.distance.miles.toFixed(1)} mi ({routeData.toDestination.duration.minutes} min)
-                </Text>
-               )}
+                {routeData?.toDestination && (
+                  <Text style={styles.tripDistanceText}>
+                    {routeData.toDestination.distance.miles.toFixed(1)} mi ({routeData.toDestination.duration.minutes} min)
+                  </Text>
+                )}
               </View>
             </View>
-          </View>
+            </View>
 
           {/* Fare & Stats */}
           <View style={styles.statsContainer}>
@@ -315,7 +369,7 @@ const RideRequestModal: React.FC<RideRequestModalProps> = ({
             </TouchableOpacity>
           </View>
         </View>
-        </View>  
+         
         </Modal>
   );
 };
@@ -511,6 +565,32 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
+  airportBadge: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  airportBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4F46E5',
+    marginBottom: 2,
+  },
+  airportDetails: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#3730A3',
+  },
+  airportBadgeDropoff: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
 });
-
 export default RideRequestModal;

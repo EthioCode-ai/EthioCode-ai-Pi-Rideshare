@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import API_BASE_URL from '../config/api.config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface SavedPlace {
   id: string;
@@ -26,9 +27,15 @@ const SavedPlacesScreen = () => {
     fetchSavedPlaces();
   }, []);
 
-  const fetchSavedPlaces = async () => {
+ const fetchSavedPlaces = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/rider/${user?.id}/saved-places`);
+      const token = await AsyncStorage.getItem('authToken');
+      const response = await fetch(`${API_BASE_URL}/api/rider/${user?.id}/saved-places`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
       if (response.ok) {
         const data = await response.json();
         setPlaces(data.places || []);
@@ -64,9 +71,13 @@ const SavedPlacesScreen = () => {
           text: 'Delete', 
           style: 'destructive',
           onPress: async () => {
-            try {
+           try {
+              const token = await AsyncStorage.getItem('authToken');
               await fetch(`${API_BASE_URL}/api/rider/${user?.id}/saved-places/${placeId}`, {
                 method: 'DELETE',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                },
               });
               setPlaces(places.filter(p => p.id !== placeId));
             } catch (error) {

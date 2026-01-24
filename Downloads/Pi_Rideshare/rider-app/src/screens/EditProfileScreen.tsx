@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import API_BASE_URL from '../config/api.config';
+
 
 const EditProfileScreen = () => {
   const { colors, isDark } = useTheme();
@@ -25,9 +27,13 @@ const EditProfileScreen = () => {
 
     setSaving(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/users/${user?.id}`, {
+      const token = await AsyncStorage.getItem('authToken');
+      const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
         body: JSON.stringify({
           firstName: firstName.trim(),
           lastName: lastName.trim(),
@@ -36,9 +42,7 @@ const EditProfileScreen = () => {
       });
 
       if (response.ok) {
-        if (updateUser) {
-          updateUser({ firstName, lastName, phone });
-        }
+        await updateUser({ firstName, lastName, phone });
         Alert.alert('Success', 'Profile updated successfully!', [
           { text: 'OK', onPress: () => navigation.goBack() }
         ]);

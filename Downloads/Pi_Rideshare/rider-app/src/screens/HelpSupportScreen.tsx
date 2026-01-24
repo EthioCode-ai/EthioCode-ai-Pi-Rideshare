@@ -1,12 +1,71 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 
+interface FAQItem {
+  id: string;
+  icon: string;
+  question: string;
+  answer: string;
+}
+
+const faqData: FAQItem[] = [
+  {
+    id: '1',
+    icon: '🚗',
+    question: 'How do I book a ride?',
+    answer: 'From the Home screen, enter your destination in the "Where to?" field. Select your pickup location, choose a ride type, and tap "Confirm Ride". A nearby driver will be matched with you.',
+  },
+  {
+    id: '2',
+    icon: '💳',
+    question: 'Payment issues',
+    answer: 'All payments are processed securely through your saved payment method. If a charge seems incorrect, go to Activity > select the trip > Report an issue. Refunds typically process within 5-7 business days.',
+  },
+  {
+    id: '3',
+    icon: '🔍',
+    question: 'I lost an item during my ride',
+    answer: 'Go to Activity, find the trip, and tap "I lost an item". You can contact your driver directly through the app within 24 hours of the trip. After that, contact our support team.',
+  },
+  {
+    id: '4',
+    icon: '🛡️',
+    question: 'Report a safety concern',
+    answer: 'Your safety is our priority. For emergencies, always call 911 first. To report a concern, go to Activity > select the trip > Report a safety issue. Our Trust & Safety team reviews all reports within 24 hours.',
+  },
+  {
+    id: '5',
+    icon: '💰',
+    question: 'Fare disputes and refunds',
+    answer: 'Fares are calculated based on distance, time, and demand. If you believe you were overcharged, go to Activity > select the trip > Review fare. You can request a fare review and our team will investigate.',
+  },
+  {
+    id: '6',
+    icon: '📍',
+    question: 'Driver went the wrong way',
+    answer: 'If your driver took an inefficient route, you may be eligible for a fare adjustment. Go to Activity > select the trip > Report an issue > Driver took a poor route.',
+  },
+  {
+    id: '7',
+    icon: '❌',
+    question: 'Cancel a ride',
+    answer: 'You can cancel a ride anytime before pickup. Open the ride screen and tap "Cancel Ride". Note: A cancellation fee may apply if the driver is already on the way or has arrived.',
+  },
+  {
+    id: '8',
+    icon: '⭐',
+    question: 'How ratings work',
+    answer: 'After each ride, both riders and drivers rate each other from 1-5 stars. Your rating is an average of your last 100 trips. Maintaining a high rating helps ensure a great experience for everyone.',
+  },
+];
+
 const HelpSupportScreen = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
+  const [expandedFAQ, setExpandedFAQ] = useState<string | null>(null);
 
   const handleContact = (method: string) => {
     switch (method) {
@@ -17,13 +76,13 @@ const HelpSupportScreen = () => {
         Linking.openURL('mailto:support@pivip.com?subject=Help Request');
         break;
       case 'chat':
-        Alert.alert('Live Chat', 'Live chat feature coming soon!');
+        Alert.alert('Live Chat', 'Live chat support is available 24/7. This feature will connect you with a support agent.');
         break;
     }
   };
 
-  const handleFAQ = (topic: string) => {
-    Alert.alert(topic, 'Detailed help article coming soon!');
+  const toggleFAQ = (id: string) => {
+    setExpandedFAQ(expandedFAQ === id ? null : id);
   };
 
   const styles = StyleSheet.create({
@@ -74,6 +133,11 @@ const HelpSupportScreen = () => {
       padding: 16,
       marginBottom: 12,
       alignItems: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+      elevation: 2,
     },
     contactIcon: {
       fontSize: 28,
@@ -100,31 +164,50 @@ const HelpSupportScreen = () => {
       color: isDark ? '#888888' : '#999999',
     },
     faqItem: {
+      backgroundColor: isDark ? '#1a1a2e' : '#FFFFFF',
+      borderRadius: 12,
+      marginBottom: 10,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    faqHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+      padding: 16,
     },
     faqIcon: {
       fontSize: 22,
-      marginRight: 16,
-      width: 32,
+      marginRight: 14,
+      width: 30,
       textAlign: 'center',
     },
-    faqText: {
+    faqQuestion: {
       flex: 1,
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '600',
       color: isDark ? '#FFFFFF' : '#1a1a2e',
     },
     faqArrow: {
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: '600',
       color: isDark ? '#888888' : '#999999',
     },
+    faqAnswer: {
+      paddingHorizontal: 16,
+      paddingBottom: 16,
+      paddingTop: 0,
+    },
+    faqAnswerText: {
+      fontSize: 14,
+      lineHeight: 22,
+      color: isDark ? '#B0B0B0' : '#666666',
+    },
     legalSection: {
-      marginTop: 12,
+      marginTop: 8,
     },
     legalItem: {
       flexDirection: 'row',
@@ -165,7 +248,7 @@ const HelpSupportScreen = () => {
             <Text style={styles.contactIcon}>💬</Text>
             <View style={styles.contactInfo}>
               <Text style={styles.contactTitle}>Live Chat</Text>
-              <Text style={styles.contactDescription}>Chat with our support team</Text>
+              <Text style={styles.contactDescription}>Available 24/7</Text>
             </View>
             <Text style={styles.contactArrow}>›</Text>
           </TouchableOpacity>
@@ -192,35 +275,20 @@ const HelpSupportScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
 
-          <TouchableOpacity style={styles.faqItem} onPress={() => handleFAQ('How do I book a ride?')}>
-            <Text style={styles.faqIcon}>🚗</Text>
-            <Text style={styles.faqText}>How do I book a ride?</Text>
-            <Text style={styles.faqArrow}>›</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.faqItem} onPress={() => handleFAQ('Payment issues')}>
-            <Text style={styles.faqIcon}>💳</Text>
-            <Text style={styles.faqText}>Payment issues</Text>
-            <Text style={styles.faqArrow}>›</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.faqItem} onPress={() => handleFAQ('Lost items')}>
-            <Text style={styles.faqIcon}>🔍</Text>
-            <Text style={styles.faqText}>I lost an item during my ride</Text>
-            <Text style={styles.faqArrow}>›</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.faqItem} onPress={() => handleFAQ('Report a safety concern')}>
-            <Text style={styles.faqIcon}>🛡️</Text>
-            <Text style={styles.faqText}>Report a safety concern</Text>
-            <Text style={styles.faqArrow}>›</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.faqItem} onPress={() => handleFAQ('Fare disputes')}>
-            <Text style={styles.faqIcon}>💰</Text>
-            <Text style={styles.faqText}>Fare disputes and refunds</Text>
-            <Text style={styles.faqArrow}>›</Text>
-          </TouchableOpacity>
+          {faqData.map((faq) => (
+            <View key={faq.id} style={styles.faqItem}>
+              <TouchableOpacity style={styles.faqHeader} onPress={() => toggleFAQ(faq.id)}>
+                <Text style={styles.faqIcon}>{faq.icon}</Text>
+                <Text style={styles.faqQuestion}>{faq.question}</Text>
+                <Text style={styles.faqArrow}>{expandedFAQ === faq.id ? '▼' : '›'}</Text>
+              </TouchableOpacity>
+              {expandedFAQ === faq.id && (
+                <View style={styles.faqAnswer}>
+                  <Text style={styles.faqAnswerText}>{faq.answer}</Text>
+                </View>
+              )}
+            </View>
+          ))}
         </View>
 
         <View style={styles.section}>

@@ -1,0 +1,483 @@
+# Pi VIP Rideshare - Continuation Report
+**Date:** January 19, 2026  
+**Session Focus:** Driver Availability After Cancellation, Navigation Cleanup, Admin Dashboard Active Rides
+
+---
+
+## Executive Summary
+
+This session focused on two critical bugs affecting the ride cancellation flow and one feature enhancement for the Admin Dashboard. We successfully identified root causes for both bugs and implemented fixes for the database-related issue. The navigation cleanup issue required deeper investigation and a fix was prepared but not yet deployed due to complexity.
+
+---
+
+## Technology Stack Reference
+
+| Layer | Technology |
+|-------|------------|
+| Driver App | React Native (TypeScript), Google Navigation SDK |
+| Rider App | React Native (TypeScript) |
+| Backend | Node.js, Express, Socket.IO |
+| Database | PostgreSQL |
+| Hosting | Render |
+| Admin Dashboard | React (web) |
+| APIs | Stripe, Google Maps, Twilio, OpenAI |
+
+---
+
+## Issue #1: Driver Not Available After Ride Cancellation
+
+### Problem Statement
+When a Rider cancels a ride, the Driver becomes unavailable for subsequent ride requests. The driver doesn't appear in the matching algorithm for new rides.
+
+### Root Cause Analysis
+We traced the flow and discovered:
+
+1. **Initial Hypothesis:** The `updateDriverAvailability()` function wasn't updating the database.
+
+2. **Discovery #1:** The function at line 7433 in `server/index.js` contained a query referencing a non-existent column:
+   ```javascript
+   await db.query(
+     `UPDATE driver_locations 
+      SET is_available = $1, 
+          current_ride_id = $2,  // ← COLUMN DOESN'T EXIST!
+          updated_at = CURRENT_TIMESTAMP 
+      WHERE driver_id = $3`,
+     [data.isAvailable, data.currentRideId || null, driverId]
+   );
+   ```
+
+3. **Database Schema Verification:** We confirmed via PostgreSQL that `driver_locations` table has these columns:
+   ```
+   driver_id, latitude, longitude, heading, speed, altitude, 
+   accuracy, is_available, last_ping, created_at, updated_at
+   ```
+   **No `current_ride_id` column exists.**
+
+4. **Result:** The UPDATE query failed silently (caught by try-catch), so `is_available` was never set to `true` in the database.
+
+### Fix Applied ✅
+
+**File:** `C:\Users\abiys\Downloads\Pi_Rideshare\server\index.js`  
+**Line:** ~7433-7442
+
+**Before:**
+```javascript
+if (data.isAvailable !== undefined) {
+  await db.query(
+    `UPDATE driver_locations 
+     SET is_available = $1, 
+         current_ride_id = $2,
+         updated_at = CURRENT_TIMESTAMP 
+     WHERE driver_id = $3`,
+    [data.isAvailable, data.currentRideId || null, driverId]
+  );
+  console.log(`✅ [DB] Driver ${driverId} availability updated: is_available=${data.isAvailable}, current_ride_id=${data.currentRideId || null}`);
+}
+```
+
+**After:**
+```javascript
+if (data.isAvailable !== undefined) {
+  await db.query(
+    `UPDATE driver_locations 
+     SET is_available = $1, 
+         updated_at = CURRENT_TIMESTAMP 
+     WHERE driver_id = $2`,
+    [data.isAvailable, driverId]
+  );
+  console.log(`✅ [DB] Driver ${driverId} availability updated: is_available=${data.isAvailable}`);
+}
+```
+
+**Deployment:**
+```powershell
+cd C:\Users\abiys\Downloads\Pi_Rideshare\server
+git add index.js
+git commit -m "Fix: Remove current_ride_id from driver availability update query"
+git push origin HEAD:master
+```
+
+### Verification
+After deployment, Render logs showed:
+```
+✅ [DB] Driver ab0edbee-2a69-4020-8645-f98793c8bcea availability updated: is_available=true
+```
+
+### Additional Issue Discovered
+Despite the database fix, the driver still wasn't receiving new rides. Further investigation revealed:
+
+**The in-memory Map takes priority over the database.** The ride-matching algorithm checks `driverAvailability` Map first:
+```javascript
+const nearbyDrivers = Array.from(driverAvailability.values())
+  .filter(driver => driver.isAvailable && ...)
+```
+
+The Driver app was continuously sending location updates with `isAvailable: false` because the navigation was still running, overwriting the availability back to `false`.
+
+### Secondary Fix Needed (Prepared but Not Deployed)
+Add direct database update in the cancellation handler to ensure driver is released even if in-memory state is inconsistent.
+
+**File:** `server/index.js`  
+**Location:** Lines 7814-7822 (rider-cancel-ride socket handler)
+
+**Proposed Addition:**
+```javascript
+if (ride.driver_id) {
+  io.to(`user-${ride.driver_id}`).emit('ride-cancelled', cancellationData);
+  console.log(`📡 [CANCEL] Emitted ride-cancelled to driver ${ride.driver_id}`);
+  
+  // Reset driver availability - DIRECT DATABASE UPDATE
+  try {
+    await db.query(
+      `UPDATE driver_locations SET is_available = true, updated_at = CURRENT_TIMESTAMP WHERE driver_id = $1`,
+      [ride.driver_id]
+    );
+    console.log(`✅ [CANCEL] Driver ${ride.driver_id} is_available set to TRUE in database`);
+  } catch (dbError) {
+    console.error(`❌ [CANCEL] Failed to update driver availability in database:`, dbError);
+  }
+  
+  // Also update in-memory map
+  updateDriverAvailability(ride.driver_id, {
+    isAvailable: true,
+    currentRideId: null
+  });
+  console.log(`✅ [CANCEL] Driver ${ride.driver_id} availability reset in memory`);
+}
+```
+
+---
+
+## Issue #2: Navigation Stays ON After Cancellation
+
+### Problem Statement
+When a Rider cancels a ride, the "Driving with Google..." notification persists in the Android status bar. The Google Navigation SDK ForegroundService doesn't terminate.
+
+### Root Cause Analysis
+
+1. **Initial App Crash:** The Driver app was crashing when a cancellation event was received. This was caused by **double cleanup** — both the `onRideCancelled` handler AND the `useEffect` cleanup were trying to call SDK cleanup methods.
+
+2. **Fix for Crash:** Added `cleanupDone` ref to prevent double cleanup.
+
+3. **Notification Still Persists:** Even after preventing the crash, the notification stayed because:
+   - The `onRideCancelled` listener captures `navigationController` in a closure
+   - If `navigationController` was `null` when the listener was created, it stays `null` inside the callback (stale closure)
+   - The cleanup code checks `if (navigationController)` — if null, cleanup never runs
+   - But `cleanupDone.current = true` was set BEFORE the null check, preventing the useEffect cleanup from running as a fallback
+
+### Files Modified ✅ (Partial Fix Deployed)
+
+**File:** `C:\Users\abiys\Downloads\Pi_Rideshare\driver-app\src\screens\ActiveRideScreen.tsx`
+
+**Change 1 - Added cleanupDone ref (around line 152):**
+```javascript
+// Refs
+const navigationInitialized = useRef(false);
+const cleanupDone = useRef(false);  // Prevents double cleanup crash
+const rideRef = useRef(initialRide);
+```
+
+**Change 2 - Added check in onRideCancelled handler:**
+```javascript
+socketService.onRideCancelled(async (data) => {
+  console.log('❌ [WithSDK] Ride cancelled by rider:', data);
+  // Prevent double cleanup
+  if (cleanupDone.current) {
+    console.log('🛑 [CLEANUP] Already cleaned up, skipping');
+    return;
+  }
+  cleanupDone.current = true;
+  // ... rest of cleanup code
+});
+```
+
+**Result:** App no longer crashes on cancellation.
+
+### Full Fix Prepared (NOT YET DEPLOYED) 🔶
+
+The complete fix requires using a ref to always get the latest `navigationController`:
+
+**Change 1 - Add navRef (line ~152):**
+```javascript
+// Refs
+const navigationInitialized = useRef(false);
+const cleanupDone = useRef(false);
+const navRef = useRef<any>(null);  // Holds latest navigationController
+const rideRef = useRef(initialRide);
+```
+
+**Change 2 - Keep navRef updated (after line ~171):**
+```javascript
+// Keep navRef updated with latest navigationController
+useEffect(() => {
+  navRef.current = navigationController;
+}, [navigationController]);
+```
+
+**Change 3 - Replace entire onRideCancelled useEffect (lines 195-280):**
+```javascript
+// *** LISTEN FOR RIDER CANCELLATION ***
+useEffect(() => {
+  console.log('📷 [WithSDK] Setting up ride-cancelled listener');
+  
+  socketService.onRideCancelled(async (data) => {
+    console.log('❌ [WithSDK] Ride cancelled by rider:', data);
+    
+    // 1. GET CONTROLLER FIRST
+    const controller = navRef.current;
+    
+    // 2. VERIFY PRESENCE - return WITHOUT setting flag if null
+    if (!controller) {
+      console.warn("⚠️ Cancellation received, but SDK not ready");
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Home', params: { stayOnline: true } }],
+      });
+      return;
+    }
+    
+    // 3. CHECK FLAG
+    if (cleanupDone.current) {
+      console.log('🛑 [CLEANUP] Already cleaned up, skipping');
+      return;
+    }
+    
+    // 4. EXECUTE CLEANUP
+    try {
+      console.log('🧹 Executing cleanup sequence...');
+      
+      await controller.stopGuidance();
+      console.log('🛑 [CLEANUP] stopGuidance() completed');
+      
+      await controller.clearDestinations();
+      console.log('🛑 [CLEANUP] clearDestinations() completed');
+      
+      controller.stopUpdatingLocation();
+      console.log('🛑 [CLEANUP] stopUpdatingLocation() called');
+      
+      removeListeners({});
+      console.log('🛑 [CLEANUP] removeListeners() called');
+      
+      await controller.cleanup();
+      console.log('🛑 [CLEANUP] cleanup() completed');
+      
+      // 5. SET FLAG ONLY AFTER SUCCESS
+      cleanupDone.current = true;
+      console.log('✅ Cleanup complete, notification should be dismissed');
+      
+      // Hide NavigationView
+      setShowNavView(false);
+      
+      // Show alert and navigate home
+      Alert.alert(
+        'Ride Cancelled',
+        data?.reason || 'The rider has cancelled this ride.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Home', params: { stayOnline: true } }],
+              });
+            },
+          },
+        ],
+      );
+    } catch (error) {
+      console.error('❌ [CLEANUP] Cleanup failed:', error);
+      // Flag stays FALSE - useEffect cleanup can retry
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Home', params: { stayOnline: true } }],
+      });
+    }
+  });
+
+  return () => {
+    socketService.off('ride-cancelled');
+  };
+}, [navigation, removeListeners]);
+```
+
+### Key Logic Flow for Fix
+| Step | Action | cleanupDone State |
+|------|--------|-------------------|
+| 1 | Get controller from navRef | `false` |
+| 2 | Controller null? Return (don't set flag) | `false` (unchanged) |
+| 3 | Already cleaned? Return | `false` (unchanged) |
+| 4 | Execute cleanup | `false` |
+| 5 | Cleanup succeeds | `true` ← Only now |
+
+This prevents the "Logic Trap" where the flag is set but cleanup never ran.
+
+---
+
+## Issue #3: Admin Dashboard - Active Rides Display
+
+### Problem Statement
+The Admin Dashboard shows Online Drivers and Online Riders, but does not display Active Rides.
+
+### Discovery
+- Backend endpoint already exists: `GET /api/rides/active`
+- Returns rides with status: `requested`, `accepted`, `en_route`, `arrived`
+- Dashboard has `activeRides` state defined but unused
+
+### Fix Prepared (NOT YET DEPLOYED) 🔶
+
+**File:** `C:\Users\abiys\Downloads\Pi_Rideshare\admin-dashboard\src\pages\Dashboard.tsx`
+
+**Changes Required:**
+
+1. **Add fetch function** (before `fetchRealAnalytics`):
+```javascript
+const fetchActiveRides = async () => {
+  try {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+
+    const response = await fetch(apiUrl('api/rides/active'), {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success) {
+        setActiveRides(data.rides || []);
+        console.log(`🚗 Dashboard: ${data.rides?.length || 0} active rides`);
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching active rides:', error);
+  }
+};
+```
+
+2. **Call fetch on mount** (modify existing useEffect):
+```javascript
+useEffect(() => {
+  fetchRealAnalytics();
+  fetchActiveRides();  // ADD THIS
+  fetchSurgeData();
+  fetchHeatmapData();
+}, [selectedMarket]);
+```
+
+3. **Add auto-refresh** (modify existing useEffect):
+```javascript
+useEffect(() => {
+  const interval = setInterval(() => {
+    fetchHeatmapData();
+    fetchActiveRides();  // ADD THIS
+  }, 30000);
+  return () => clearInterval(interval);
+}, []);
+```
+
+4. **Add Active Rides UI section** (after Live Activity Map, before Stats Grid) - Full JSX provided in session.
+
+---
+
+## Additional Bugs Discovered (Not Yet Addressed)
+
+### 1. Database Column Mismatch in Fallback Query
+**File:** `server/index.js` line ~7011-7022  
+**Issue:** Query uses `dl.lat` and `dl.lng` but table has `latitude` and `longitude`
+
+**Fix Required:**
+```javascript
+// Change FROM:
+SELECT u.id, u.first_name, u.last_name, u.phone, u.rating,
+       dl.lat, dl.lng, dl.is_available
+
+// Change TO:
+SELECT u.id, u.first_name, u.last_name, u.phone, u.rating,
+       dl.latitude AS lat, dl.longitude AS lng, dl.is_available
+```
+
+### 2. UUID Error in Cancellation
+**Render Logs:**
+```
+updateRideStatus error: error: invalid input syntax for type uuid: "rider"
+```
+**Issue:** The `cancelled_by` field expects a UUID (user ID), but code is passing the string `"rider"`.
+
+---
+
+## Files Modified Summary
+
+| File | Status | Changes |
+|------|--------|---------|
+| `server/index.js` | ✅ Deployed | Removed `current_ride_id` from UPDATE query |
+| `driver-app/src/screens/ActiveRideScreen.tsx` | ✅ Partial | Added `cleanupDone` ref to prevent crash |
+| `driver-app/src/screens/ActiveRideScreen.tsx` | 🔶 Prepared | Full navRef fix for navigation cleanup |
+| `admin-dashboard/src/pages/Dashboard.tsx` | 🔶 Prepared | Active Rides display feature |
+| `server/index.js` | 🔶 Prepared | Direct DB update in cancellation handler |
+
+---
+
+## Deployment Commands Reference
+
+### Backend (server)
+```powershell
+cd C:\Users\abiys\Downloads\Pi_Rideshare\server
+git add index.js
+git commit -m "Your commit message"
+git push origin HEAD:master
+```
+
+### Driver App (requires APK rebuild)
+```powershell
+cd C:\Users\abiys\Downloads\Pi_Rideshare\driver-app
+npx react-native run-android --variant=release
+```
+
+### Admin Dashboard
+```powershell
+cd C:\Users\abiys\Downloads\Pi_Rideshare\admin-dashboard
+npm run build
+# Deploy to hosting
+```
+
+---
+
+## What's Next (Priority Order)
+
+### High Priority
+1. **Deploy full Navigation Cleanup fix** - Apply the navRef changes to `ActiveRideScreen.tsx` and rebuild APK
+2. **Deploy Active Rides feature** - Apply changes to `Dashboard.tsx`
+
+### Medium Priority
+3. **Fix database fallback query** - Change `dl.lat/lng` to `dl.latitude/longitude`
+4. **Add direct DB update to cancellation handler** - Ensure driver is released even if in-memory state is wrong
+
+### Lower Priority
+5. **Fix UUID error** in `cancelled_by` field
+6. **Test full end-to-end cancellation flow** after all fixes deployed
+
+---
+
+## Testing Checklist
+
+After deploying all fixes, test this flow:
+1. ☐ Rider requests a ride
+2. ☐ Driver accepts the ride
+3. ☐ Rider cancels the ride
+4. ☐ Driver app shows "Ride Cancelled" alert
+5. ☐ "Driving with Google..." notification disappears
+6. ☐ Driver navigates to Home screen
+7. ☐ Rider requests another ride
+8. ☐ Same Driver receives the new request
+9. ☐ Active ride appears in Admin Dashboard during ride
+
+---
+
+## Contact & Resources
+
+- **Backend Hosting:** Render (auto-deploys from GitHub master branch)
+- **GitHub Repo:** https://github.com/EthioCode-ai/EthioCode-ai-Pi-Rideshare
+- **Google Navigation SDK Docs:** https://developers.google.com/maps/documentation/navigation
+
+---
+
+*Report generated: January 19, 2026*

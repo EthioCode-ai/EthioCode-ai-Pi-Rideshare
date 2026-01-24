@@ -10,8 +10,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthStack from './AuthStack';
 import HomeScreen from '../screens/HomeScreen';
 import ActiveRideScreen from '../screens/ActiveRideScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import DocumentsScreen from '../screens/DocumentsScreen';
+import ChatScreen from '../screens/ChatScreen';
+import EarningsScreen from '../screens/EarningsScreen';
+import PayoutMethodsScreen from '../screens/PayoutMethodsScreen';
+import AddPayoutMethodScreen from '../screens/AddPayoutMethodScreen';
 import { StorageKeys } from '../constants/StorageKeys';
 import { ActiveRide } from '../types/ride.types';
+
 
 import { createStackNavigator } from '@react-navigation/stack';
 
@@ -27,7 +34,7 @@ export type MainStackParamList = {
   stayOnline?: boolean;
 } | undefined;
 
-  ActiveRide: { 
+ActiveRide: { 
     ride: ActiveRide;
     routeData: {
       toPickup: {
@@ -44,6 +51,16 @@ export type MainStackParamList = {
       };
     };
   };
+    Settings: undefined;
+    Documents: undefined;
+     Chat: {
+    riderId: string;
+    riderName: string;
+    rideId: string;
+  };
+  Earnings: undefined;
+  PayoutMethods: undefined;
+  AddPayoutMethod: undefined;
 };
 
 const MainStack = createStackNavigator<MainStackParamList>();
@@ -63,6 +80,12 @@ function MainAppNavigator() {
           gestureEnabled: false, // Prevent swipe back during active ride
         }}
       />
+    <MainStack.Screen name="Settings" component={SettingsScreen} />
+    <MainStack.Screen name="Documents" component={DocumentsScreen} />
+    <MainStack.Screen name="Chat" component={ChatScreen} />
+    <MainStack.Screen name="Earnings" component={EarningsScreen} />
+    <MainStack.Screen name="PayoutMethods" component={PayoutMethodsScreen} />
+    <MainStack.Screen name="AddPayoutMethod" component={AddPayoutMethodScreen} />
     </MainStack.Navigator>
   );
 }

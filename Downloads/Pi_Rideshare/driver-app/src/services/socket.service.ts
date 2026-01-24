@@ -25,13 +25,13 @@ export interface RideRequest {
   riderName: string;
   pickup: {
     address: string;
-    latitude: number;
-    longitude: number;
+    lat: number;
+    lng: number;
   };
   destination: {
     address: string;
-    latitude: number;
-    longitude: number;
+    lat: number;
+    lng: number;
   };
   estimatedFare: number;
   estimatedDistance: number;
@@ -224,6 +224,27 @@ class SocketService {
     this.listeners.get(event)?.push(callback);
   }
 
+/**
+   * Listen for Ride Cancellation (by rider)
+   *
+   * @param callback - Function to call when ride is cancelled
+   */
+  onRideCancelled(callback: (data: any) => void): void {
+    if (!this.socket) {
+      console.error('❌ Socket not connected');
+      return;
+    }
+    const event = SOCKET_CONFIG.events.RIDE_CANCELLED;
+    this.socket.on(event, (data: any) => {
+      console.log('❌ Ride cancelled:', data);
+      callback(data);
+    });
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)?.push(callback);
+  }
+
   /**
    * Listen for Corporate Verification Requests
    * 
@@ -378,6 +399,8 @@ rejectRide(driverId: string, rideId: string): void {
     return;
   }
 
+  
+
   console.log('❌ Rejecting ride:', rideId);
 
   this.socket.emit(SOCKET_CONFIG.events.REJECT_RIDE, {
@@ -386,6 +409,28 @@ rejectRide(driverId: string, rideId: string): void {
     timestamp: new Date().toISOString(),
   });
 }
+/**
+   * Cancel Active Ride
+   *
+   * @param driverId - Driver's user ID
+   * @param rideId - Ride ID to cancel
+   * @param reason - Optional cancellation reason
+   */
+  cancelRide(driverId: string, rideId: string, reason?: string): void {
+    if (!this.socket || !this.isConnected) {
+      console.warn('⚠️ Cannot cancel ride: socket not connected');
+      return;
+    }
+
+    console.log('❌ Cancelling ride:', rideId);
+
+    this.socket.emit('driver-cancel-ride', {
+      driverId,
+      rideId,
+      reason: reason || 'Driver cancelled',
+      timestamp: new Date().toISOString(),
+    });
+  }
   /**
    * Update Trip Status
    * 
@@ -449,6 +494,39 @@ onSurgeUpdate(callback: (data: any) => void): void {
   }
   this.socket.on('surge-update', callback);
 }
+
+/**
+ * Send chat message to rider
+ */
+sendChatMessage(data: {
+  rideId: string;
+  riderId: string;
+  driverId: string;
+  message: string;
+  sender: 'driver' | 'rider';
+}): void {
+  if (!this.socket) {
+    console.error('❌ Socket not connected');
+    return;
+  }
+  this.socket.emit('chat-message', data);
+  console.log('💬 Chat message sent:', data.message);
+}
+
+/**
+ * Listen for incoming chat messages
+ */
+onChatMessage(callback: (data: any) => void): void {
+  if (!this.socket) {
+    console.error('❌ Socket not connected');
+    return;
+  }
+  this.socket.on('chat-message', (data: any) => {
+    console.log('💬 Chat message received:', data);
+    callback(data);
+  });
+}
+
 
 /**
  * Stop listening for surge updates
