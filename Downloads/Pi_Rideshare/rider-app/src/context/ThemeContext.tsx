@@ -72,24 +72,19 @@ const lightColors: ThemeColors = {
   surface: '#ffffff',
   card: '#ffffff',
   cardBorder: '#e2e8f0',
-  
-  text: '#1e293b',
+  text: '#062557ff',
   textSecondary: '#475569',
   textMuted: '#94a3b8',
-  
-  primary: '#d97706',
-  primaryLight: '#f59e0b',
+  primary: '#021236ff',      // Blue for light mode
+  primaryLight: '#022358ff', // Light blue
   secondary: '#16a34a',
-  
   success: '#16a34a',
-  warning: '#d97706',
+  warning: '#f59e0b',
   error: '#dc2626',
-  
   mapStyle: 'standard',
   road: '#e2e8f0',
   roadMain: '#cbd5e1',
   building: '#f1f5f9',
-  
   inputBackground: '#f1f5f9',
   inputBorder: '#e2e8f0',
   bottomSheet: 'rgba(255, 255, 255, 0.98)',

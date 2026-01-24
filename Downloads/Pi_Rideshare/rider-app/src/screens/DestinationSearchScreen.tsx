@@ -8,6 +8,9 @@ import {
   FlatList,
   ActivityIndicator,
   Keyboard,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -22,10 +25,15 @@ import { locationService } from '../services/location.service';
 import { StorageKeys } from '../constants';
 import { SavedPlace } from '../types';
 
+// Enable LayoutAnimation for Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'DestinationSearch'>;
 type RouteProps = RouteProp<RootStackParamList, 'DestinationSearch'>;
 
-type ActiveField = 'pickup' | 'destination';
+type ActiveField = 'pickup' | 'destination' | 'stop';
 
 interface LocationData {
   latitude: number;
@@ -45,10 +53,12 @@ const DestinationSearchScreen = () => {
   // Location states
   const [pickup, setPickup] = useState<LocationData | null>(initialPickup || null);
   const [destination, setDestination] = useState<LocationData | null>(null);
+  const [stop, setStop] = useState<LocationData | null>(null);
 
   // Input text states
   const [pickupText, setPickupText] = useState(initialPickup?.address || '');
   const [destinationText, setDestinationText] = useState('');
+  const [stopText, setStopText] = useState('');
 
   // UI states
   const [activeField, setActiveField] = useState<ActiveField>('destination');
@@ -56,6 +66,7 @@ const DestinationSearchScreen = () => {
   const [loading, setLoading] = useState(false);
   const [gettingCurrentLocation, setGettingCurrentLocation] = useState(false);
   const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]);
+  const [showAddStop, setShowAddStop] = useState(false);
 
   // Handle returned location from MapPickerScreen
   useEffect(() => {
@@ -87,6 +98,8 @@ const DestinationSearchScreen = () => {
       navigation.navigate('RideConfirm', {
         pickup,
         destination,
+        // Pass stop as part of navigation params if needed
+        // stops: stop ? [stop] : [],
       });
     }
   };
@@ -159,7 +172,7 @@ const DestinationSearchScreen = () => {
 
   const handlePickupChange = (text: string) => {
     setPickupText(text);
-    setPickup(null); // Clear pickup when editing
+    setPickup(null);
     setActiveField('pickup');
     setLoading(true);
     searchPlaces(text, 'pickup');
@@ -167,10 +180,18 @@ const DestinationSearchScreen = () => {
 
   const handleDestinationChange = (text: string) => {
     setDestinationText(text);
-    setDestination(null); // Clear destination when editing
+    setDestination(null);
     setActiveField('destination');
     setLoading(true);
     searchPlaces(text, 'destination');
+  };
+
+  const handleStopChange = (text: string) => {
+    setStopText(text);
+    setStop(null);
+    setActiveField('stop');
+    setLoading(true);
+    searchPlaces(text, 'stop');
   };
 
   const handleSelectPrediction = async (prediction: PlacePrediction) => {
@@ -190,6 +211,11 @@ const DestinationSearchScreen = () => {
         if (activeField === 'pickup') {
           setPickup(locationData);
           setPickupText(prediction.mainText);
+          setPredictions([]);
+          setActiveField('destination');
+        } else if (activeField === 'stop') {
+          setStop(locationData);
+          setStopText(prediction.mainText);
           setPredictions([]);
           setActiveField('destination');
         } else {
@@ -213,7 +239,7 @@ const DestinationSearchScreen = () => {
 
   const handlePickOnMap = () => {
     navigation.navigate('MapPicker', {
-      field: activeField,
+      field: activeField === 'stop' ? 'destination' : activeField,
       currentLocation: activeField === 'pickup' ? pickup || undefined : destination || undefined,
     });
   };
@@ -229,10 +255,30 @@ const DestinationSearchScreen = () => {
       setPickup(locationData);
       setPickupText(place.name);
       setActiveField('destination');
+    } else if (activeField === 'stop') {
+      setStop(locationData);
+      setStopText(place.name);
+      setActiveField('destination');
     } else {
       setDestination(locationData);
       setDestinationText(place.name);
     }
+  };
+
+  const toggleAddStop = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setShowAddStop(!showAddStop);
+    if (!showAddStop) {
+      setActiveField('stop');
+    }
+  };
+
+  const removeStop = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setStop(null);
+    setStopText('');
+    setShowAddStop(false);
+    setActiveField('destination');
   };
 
   const canConfirm = pickup && destination;
@@ -245,26 +291,28 @@ const DestinationSearchScreen = () => {
     header: {
       padding: 20,
       borderBottomWidth: 1,
-      borderBottomColor: colors.cardBorder,
+      borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
     },
-    closeButton: {
-      marginBottom: 20,
+   closeButton: {
+      padding: 8,
+      marginBottom: 16,
     },
     closeText: {
-      fontSize: 24,
-      color: colors.text,
+      fontSize: 36,
+      color: isDark ? '#FFFFFF' : '#1a1a2e',
+      fontWeight: '300',
     },
     inputsContainer: {
       gap: 12,
     },
     inputRow: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 12,
     },
     dotsContainer: {
       alignItems: 'center',
-      paddingVertical: 4,
+      paddingTop: 14,
     },
     dot: {
       width: 12,
@@ -272,15 +320,18 @@ const DestinationSearchScreen = () => {
       borderRadius: 6,
     },
     dotPickup: {
-      backgroundColor: colors.primary,
+      backgroundColor: '#10B981',
+    },
+    dotStop: {
+      backgroundColor: '#F59E0B',
     },
     dotDest: {
-      backgroundColor: colors.secondary,
+      backgroundColor: '#EF4444',
     },
     dotLine: {
       width: 2,
       height: 20,
-      backgroundColor: colors.cardBorder,
+      backgroundColor: isDark ? '#333333' : '#E5E7EB',
       marginVertical: 4,
     },
     inputsRight: {
@@ -288,22 +339,102 @@ const DestinationSearchScreen = () => {
       gap: 8,
     },
     input: {
-      backgroundColor: colors.inputBackground,
+      backgroundColor: isDark ? '#1a1a2e' : '#F5F5F5',
       borderRadius: 12,
       padding: 14,
       fontSize: 15,
-      color: colors.text,
+      fontWeight: '500',
+      color: isDark ? '#FFFFFF' : '#1a1a2e',
       borderWidth: 2,
       borderColor: 'transparent',
     },
     inputActive: {
-      borderColor: colors.primary,
+      borderColor: '#E67E22',
     },
     inputFilled: {
-      borderColor: colors.secondary,
+      borderColor: '#10B981',
     },
     inputLoading: {
       opacity: 0.7,
+    },
+    addStopSection: {
+      marginTop: 8,
+    },
+    addStopButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: isDark ? '#1a1a2e' : '#FFFFFF',
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+    },
+    addStopLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    addStopIcon: {
+      fontSize: 20,
+    },
+    addStopText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: isDark ? '#FFFFFF' : '#1a1a2e',
+    },
+    addStopArrow: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: isDark ? '#333333' : '#F0F0F0',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    addStopArrowText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: isDark ? '#FFFFFF' : '#1a1a2e',
+    },
+    stopInputContainer: {
+      marginTop: 12,
+      backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : 'rgba(245, 158, 11, 0.08)',
+      borderRadius: 12,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(245, 158, 11, 0.3)',
+    },
+    stopInputHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 10,
+    },
+    stopInputLabel: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: '#F59E0B',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    removeStopButton: {
+      padding: 4,
+    },
+    removeStopText: {
+      fontSize: 18,
+      color: '#EF4444',
+      fontWeight: '600',
+    },
+    stopInput: {
+      backgroundColor: isDark ? '#1a1a2e' : '#FFFFFF',
+      borderRadius: 10,
+      padding: 12,
+      fontSize: 15,
+      fontWeight: '500',
+      color: isDark ? '#FFFFFF' : '#1a1a2e',
+      borderWidth: 2,
+      borderColor: activeField === 'stop' ? '#F59E0B' : 'transparent',
     },
     quickActions: {
       flexDirection: 'row',
@@ -316,20 +447,20 @@ const DestinationSearchScreen = () => {
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
-      backgroundColor: colors.inputBackground,
+      backgroundColor: isDark ? '#1a1a2e' : '#FFFFFF',
       paddingVertical: 12,
       paddingHorizontal: 16,
       borderRadius: 10,
       borderWidth: 1,
-      borderColor: colors.cardBorder,
+      borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
     },
     quickActionText: {
       fontSize: 13,
-      color: colors.primary,
+      color: '#E67E22',
       fontWeight: '600',
     },
     confirmButton: {
-      backgroundColor: colors.primary,
+      backgroundColor: '#E67E22',
       paddingVertical: 16,
       borderRadius: 12,
       alignItems: 'center',
@@ -337,6 +468,11 @@ const DestinationSearchScreen = () => {
       flexDirection: 'row',
       justifyContent: 'center',
       gap: 8,
+      shadowColor: '#E67E22',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
+      elevation: 4,
     },
     confirmButtonDisabled: {
       opacity: 0.5,
@@ -344,18 +480,19 @@ const DestinationSearchScreen = () => {
     confirmButtonText: {
       fontSize: 16,
       fontWeight: '700',
-      color: isDark ? '#0d0d1a' : '#ffffff',
+      color: '#FFFFFF',
     },
     savedPlacesContainer: {
       paddingHorizontal: 20,
       paddingTop: 16,
     },
     savedPlacesTitle: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textMuted,
+      fontSize: 13,
+      fontWeight: '700',
+      color: '#E67E22',
       marginBottom: 12,
       textTransform: 'uppercase',
+      letterSpacing: 1,
     },
     savedPlaceRow: {
       flexDirection: 'row',
@@ -366,12 +503,12 @@ const DestinationSearchScreen = () => {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.inputBackground,
+      backgroundColor: isDark ? '#1a1a2e' : '#FFFFFF',
       paddingVertical: 14,
       paddingHorizontal: 16,
       borderRadius: 12,
       borderWidth: 1,
-      borderColor: colors.cardBorder,
+      borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
       gap: 10,
     },
     savedPlaceIcon: {
@@ -382,12 +519,12 @@ const DestinationSearchScreen = () => {
     },
     savedPlaceLabel: {
       fontSize: 14,
-      fontWeight: '600',
-      color: colors.text,
+      fontWeight: '700',
+      color: isDark ? '#FFFFFF' : '#1a1a2e',
     },
     savedPlaceAddress: {
       fontSize: 11,
-      color: colors.textMuted,
+      color: isDark ? '#888888' : '#666666',
       marginTop: 2,
     },
     resultsList: {
@@ -402,12 +539,12 @@ const DestinationSearchScreen = () => {
       paddingVertical: 14,
       paddingHorizontal: 10,
       borderBottomWidth: 1,
-      borderBottomColor: colors.cardBorder,
+      borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
     },
     resultIcon: {
       width: 44,
       height: 44,
-      backgroundColor: colors.inputBackground,
+      backgroundColor: isDark ? '#1a1a2e' : '#F5F5F5',
       borderRadius: 12,
       justifyContent: 'center',
       alignItems: 'center',
@@ -422,12 +559,12 @@ const DestinationSearchScreen = () => {
     resultMain: {
       fontSize: 15,
       fontWeight: '600',
-      color: colors.text,
+      color: isDark ? '#FFFFFF' : '#1a1a2e',
       marginBottom: 3,
     },
     resultSecondary: {
       fontSize: 13,
-      color: colors.textSecondary,
+      color: isDark ? '#888888' : '#666666',
     },
     loadingContainer: {
       padding: 30,
@@ -443,14 +580,14 @@ const DestinationSearchScreen = () => {
     },
     emptyText: {
       fontSize: 14,
-      color: colors.textMuted,
+      color: isDark ? '#888888' : '#666666',
       textAlign: 'center',
     },
     activeFieldLabel: {
       fontSize: 12,
-      color: colors.primary,
+      color: '#E67E22',
       marginBottom: 8,
-      fontWeight: '600',
+      fontWeight: '700',
     },
     poweredBy: {
       padding: 10,
@@ -458,22 +595,26 @@ const DestinationSearchScreen = () => {
     },
     poweredByText: {
       fontSize: 11,
-      color: colors.textMuted,
+      color: isDark ? '#666666' : '#999999',
     },
     readyBanner: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: `${colors.secondary}20`,
+      backgroundColor: 'rgba(16, 185, 129, 0.15)',
       paddingVertical: 12,
       gap: 8,
       borderBottomWidth: 1,
-      borderBottomColor: colors.secondary,
+      borderBottomColor: '#10B981',
+    },
+    readyBannerIcon: {
+      fontSize: 16,
+      color: '#10B981',
     },
     readyBannerText: {
       fontSize: 14,
-      fontWeight: '600',
-      color: colors.secondary,
+      fontWeight: '700',
+      color: '#10B981',
     },
   });
 
@@ -497,14 +638,14 @@ const DestinationSearchScreen = () => {
       {/* Ready Banner */}
       {canConfirm && (
         <View style={styles.readyBanner}>
-          <Text>✓</Text>
+          <Text style={styles.readyBannerIcon}>✓</Text>
           <Text style={styles.readyBannerText}>Both locations selected!</Text>
         </View>
       )}
 
       <View style={styles.header}>
         <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.closeText}>←</Text>
+          <Text style={styles.closeText}>‹</Text>
         </TouchableOpacity>
 
         <View style={styles.inputsContainer}>
@@ -512,6 +653,12 @@ const DestinationSearchScreen = () => {
             <View style={styles.dotsContainer}>
               <View style={[styles.dot, styles.dotPickup]} />
               <View style={styles.dotLine} />
+              {showAddStop && (
+                <>
+                  <View style={[styles.dot, styles.dotStop]} />
+                  <View style={styles.dotLine} />
+                </>
+              )}
               <View style={[styles.dot, styles.dotDest]} />
             </View>
 
@@ -524,12 +671,32 @@ const DestinationSearchScreen = () => {
                   gettingCurrentLocation && styles.inputLoading,
                 ]}
                 placeholder={gettingCurrentLocation ? "Getting location..." : "Pickup location"}
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={isDark ? '#666666' : '#999999'}
                 value={pickupText}
                 onChangeText={handlePickupChange}
                 onFocus={() => setActiveField('pickup')}
                 editable={!gettingCurrentLocation}
               />
+
+              {showAddStop && (
+                <View style={styles.stopInputContainer}>
+                  <View style={styles.stopInputHeader}>
+                    <Text style={styles.stopInputLabel}>Add Stop Location</Text>
+                    <TouchableOpacity style={styles.removeStopButton} onPress={removeStop}>
+                      <Text style={styles.removeStopText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    style={styles.stopInput}
+                    placeholder="Enter address or business name..."
+                    placeholderTextColor={isDark ? '#666666' : '#999999'}
+                    value={stopText}
+                    onChangeText={handleStopChange}
+                    onFocus={() => setActiveField('stop')}
+                    autoFocus={showAddStop && !stop}
+                  />
+                </View>
+              )}
 
               <TextInput
                 style={[
@@ -538,14 +705,29 @@ const DestinationSearchScreen = () => {
                   destination && activeField !== 'destination' && styles.inputFilled,
                 ]}
                 placeholder="Where to?"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={isDark ? '#666666' : '#999999'}
                 value={destinationText}
                 onChangeText={handleDestinationChange}
                 onFocus={() => setActiveField('destination')}
-                autoFocus={!!initialPickup && !selectedLocation}
+                autoFocus={!!initialPickup && !selectedLocation && !showAddStop}
               />
             </View>
           </View>
+
+          {/* Add a Stop Section */}
+          {!showAddStop && (
+            <View style={styles.addStopSection}>
+              <TouchableOpacity style={styles.addStopButton} onPress={toggleAddStop}>
+                <View style={styles.addStopLeft}>
+                  <Text style={styles.addStopIcon}>📍</Text>
+                  <Text style={styles.addStopText}>Add a Stop</Text>
+                </View>
+                <View style={styles.addStopArrow}>
+                  <Text style={styles.addStopArrowText}>▼</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.quickActions}>
             <TouchableOpacity style={styles.quickAction} onPress={handleUseCurrentLocation}>
@@ -558,7 +740,7 @@ const DestinationSearchScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* Confirm Button - Always visible when both locations are set */}
+          {/* Confirm Button */}
           <TouchableOpacity
             style={[styles.confirmButton, !canConfirm && styles.confirmButtonDisabled]}
             onPress={navigateToRideConfirm}
@@ -570,7 +752,7 @@ const DestinationSearchScreen = () => {
         </View>
       </View>
 
-      {/* Saved Places - Only show when not both selected */}
+      {/* Saved Places */}
       {savedPlaces.length > 0 && predictions.length === 0 && !canConfirm && (
         <View style={styles.savedPlacesContainer}>
           <Text style={styles.savedPlacesTitle}>Saved Places</Text>
@@ -598,13 +780,13 @@ const DestinationSearchScreen = () => {
 
       {!canConfirm && activeField && (
         <Text style={[styles.activeFieldLabel, { paddingHorizontal: 20, paddingTop: savedPlaces.length > 0 && predictions.length === 0 ? 0 : 16 }]}>
-          {activeField === 'pickup' ? 'Select pickup location' : 'Select destination'}
+          {activeField === 'pickup' ? 'Select pickup location' : activeField === 'stop' ? 'Select stop location' : 'Select destination'}
         </Text>
       )}
 
       {loading && predictions.length === 0 ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} size="large" />
+          <ActivityIndicator color="#E67E22" size="large" />
         </View>
       ) : (
         <FlatList
@@ -615,7 +797,7 @@ const DestinationSearchScreen = () => {
           contentContainerStyle={styles.resultsContent}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
-            !canConfirm && (pickupText.length > 2 || destinationText.length > 2) && !loading ? (
+            !canConfirm && (pickupText.length > 2 || destinationText.length > 2 || stopText.length > 2) && !loading ? (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyIcon}>🔍</Text>
                 <Text style={styles.emptyText}>No results found</Text>

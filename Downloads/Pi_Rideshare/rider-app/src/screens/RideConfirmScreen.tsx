@@ -391,24 +391,12 @@ const RideConfirmScreen = () => {
       zIndex: 10,
     },
     backButton: {
-      width: 46,
-      height: 46,
-      backgroundColor: colors.card,
-      borderRadius: 23,
-      justifyContent: 'center',
-      alignItems: 'center',
-      borderWidth: 2,
-      borderColor: colors.primary,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.3,
-      shadowRadius: 4,
-      elevation: 5,
+      padding: 8,
     },
     backIcon: {
-      fontSize: 22,
-      fontWeight: 'bold',
-      color: colors.primary,
+      fontSize: 36,
+      fontWeight: '300',
+      color: isDark ? '#FFFFFF' : '#1a1a2e',
     },
     routeCard: {
       position: 'absolute',
@@ -845,7 +833,7 @@ const RideConfirmScreen = () => {
         {/* Header with Back Button and Route Card */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Text style={styles.backIcon}>←</Text>
+             <Text style={styles.backIcon}>‹</Text>
           </TouchableOpacity>
         </View>
 
