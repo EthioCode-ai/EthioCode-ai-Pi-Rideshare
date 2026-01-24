@@ -8393,6 +8393,16 @@ if (!rideRequest) {
       } else if (status === 'completed') {
         updateFields.status = 'completed';
         updateFields.completed_at = new Date();
+        
+        // Calculate and save distance_miles from pickup to dropoff
+        const rideData = await db.query('SELECT pickup_lat, pickup_lng, destination_lat, destination_lng FROM rides WHERE id = $1', [rideId]);
+        if (rideData.rows.length > 0) {
+          const r = rideData.rows[0];
+          const distanceKm = calculateDistance(r.pickup_lat, r.pickup_lng, r.destination_lat, r.destination_lng);
+          const distanceMiles = distanceKm * 0.621371;
+          updateFields.distance_miles = Math.round(distanceMiles * 100) / 100;
+          console.log(`📏 Ride distance: ${distanceMiles.toFixed(2)} miles`);
+        }
       }
 
       const updatedRide = await db.updateRideStatus(rideId, updateFields.status, updateFields);
