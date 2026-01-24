@@ -17,6 +17,15 @@ import ActivityScreen from '../screens/ActivityScreen';
 import AccountScreen from '../screens/AccountScreen';
 import SaveLocationScreen from '../screens/SaveLocationScreen';
 
+// Account Sub-Screens
+import SavedPlacesScreen from '../screens/SavedPlacesScreen';
+import PaymentMethodsScreen from '../screens/PaymentMethodsScreen';
+import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
+import SafetyScreen from '../screens/SafetyScreen';
+import HelpSupportScreen from '../screens/HelpSupportScreen';
+
+
 // Ride Screens
 import DestinationSearchScreen from '../screens/DestinationSearchScreen';
 import RideConfirmScreen from '../screens/RideConfirmScreen';
@@ -50,18 +59,18 @@ export type RootStackParamList = {
     type: 'home' | 'work';
   };
   RideConfirm: {
-  pickup: {
-    latitude: number;
-    longitude: number;
-    address: string;
+    pickup: {
+      latitude: number;
+      longitude: number;
+      address: string;
+    };
+    destination: {
+      latitude: number;
+      longitude: number;
+      address: string;
+    };
+    scheduledTime?: string;
   };
-  destination: {
-    latitude: number;
-    longitude: number;
-    address: string;
-  };
-  scheduledTime?: string;
-};
   ActiveRide: { 
     rideId: string;
     driver?: {
@@ -88,8 +97,15 @@ export type RootStackParamList = {
       address?: string;
     };
     eta?: number;
+    fare?: number;  // ✅ ADDED: Fare from backend calculation
   };
-  RideComplete: { rideId: string; fare: number };
+ RideComplete: { rideId: string; fare: number };
+  SavedPlaces: undefined;
+  PaymentMethods: undefined;
+  NotificationSettings: undefined;
+  EditProfile: undefined;
+  Safety: undefined;
+  HelpSupport: undefined;
 };
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -191,10 +207,40 @@ const MainNavigator = () => {
         component={ActiveRideScreen}
         options={{ gestureEnabled: false }}
       />
-      <RootStack.Screen 
-        name="RideComplete" 
+      <RootStack.Screen
+        name="RideComplete"
         component={RideCompleteScreen}
         options={{ presentation: 'modal', gestureEnabled: false }}
+      />
+      <RootStack.Screen
+        name="SavedPlaces"
+        component={SavedPlacesScreen}
+        options={{ presentation: 'card' }}
+      />
+      <RootStack.Screen
+        name="PaymentMethods"
+        component={PaymentMethodsScreen}
+        options={{ presentation: 'card' }}
+      />
+      <RootStack.Screen
+        name="NotificationSettings"
+        component={NotificationSettingsScreen}
+        options={{ presentation: 'card' }}
+      />
+      <RootStack.Screen
+        name="EditProfile"
+        component={EditProfileScreen}
+        options={{ presentation: 'card' }}
+      />
+      <RootStack.Screen
+        name="Safety"
+        component={SafetyScreen}
+        options={{ presentation: 'card' }}
+      />
+      <RootStack.Screen
+        name="HelpSupport"
+        component={HelpSupportScreen}
+        options={{ presentation: 'card' }}
       />
     </RootStack.Navigator>
   );

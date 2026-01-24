@@ -50,7 +50,7 @@ const RideConfirmScreen = () => {
  const { user } = useAuth();
 
   // State
-  const [selectedVehicle, setSelectedVehicle] = useState('everyday');
+  const [selectedVehicle, setSelectedVehicle] = useState('economy');
   const [estimates, setEstimates] = useState<RideEstimate[]>([]);
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(false);
@@ -68,7 +68,9 @@ const RideConfirmScreen = () => {
   const [searchingForDriver, setSearchingForDriver] = useState(false);
   const [searchStatus, setSearchStatus] = useState<string>('');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
+  const [currentFare, setCurrentFare] = useState<number>(0);  // ✅ ADDED
   const [searchError, setSearchError] = useState<string | null>(null);
+  const currentRideIdRef = useRef<string | null>(null);  // ADD THIS
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -101,8 +103,12 @@ const RideConfirmScreen = () => {
   const fetchEstimates = async () => {
     setLoading(true);
     try {
+      console.log('📊 Fetching estimates for:', JSON.stringify({ pickup, destination }));
       const result = await rideService.getEstimate(pickup, destination);
+      console.log('📊 Estimate API result:', JSON.stringify(result, null, 2));
       if (result.success && result.estimates) {
+        console.log('✅ Setting estimates:', result.estimates.length, 'vehicle types');
+        result.estimates.forEach((e: any) => console.log(`   - ${e.vehicleType}: $${e.totalFare}`));
         setEstimates(result.estimates);
 
         const currentSurge = result.estimates[0]?.surgeMultiplier || 1;
@@ -244,8 +250,10 @@ const RideConfirmScreen = () => {
 
       if (result.success && result.ride) {
         setCurrentRideId(result.ride.id);
+        currentRideIdRef.current = result.ride.id;  // ADD THIS
+        setCurrentFare((result.ride as any).estimated_fare || (result.ride as any).estimatedFare || 0);  // ✅ ADDED
         setSearchStatus('Finding the best π driver for you...');
-        console.log('✅ Ride created:', result.ride.id);
+        console.log('✅ Ride created:', result.ride.id, 'Fare:', currentFare);
 
         // Set timeout for driver search (60 seconds)
         searchTimeoutRef.current = setTimeout(() => {
@@ -269,6 +277,7 @@ const RideConfirmScreen = () => {
   };
 
   const setupSocketListeners = () => {
+     console.log('🔌 Setting up socket listeners, connected:', socketService.isConnected());
     // Listen for "finding driver" status updates
     socketService.onFindingDriver((data) => {
       console.log('🔍 Finding driver:', data);
@@ -288,12 +297,13 @@ const RideConfirmScreen = () => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       // Navigate to ActiveRide with driver data
-      navigation.replace('ActiveRide', {
-        rideId: data.rideId,
+       navigation.replace('ActiveRide', {
+        rideId: data.rideId || currentRideIdRef.current!,
         driver: data.driver,
         pickup: pickup,
         destination: destination,
         eta: data.eta,
+        fare: currentFare,  // ✅ ADDED
       });
     });
 

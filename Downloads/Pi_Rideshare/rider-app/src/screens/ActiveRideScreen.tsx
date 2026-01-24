@@ -56,7 +56,7 @@ const ActiveRideScreen = () => {
   const { colors, isDark } = useTheme();
   const mapRef = useRef<MapView>(null);
 
-  const { rideId, driver: routeDriver, pickup: routePickup, destination: routeDestination, eta: routeEta } = route.params;
+  const { rideId, driver: routeDriver, pickup: routePickup, destination: routeDestination, eta: routeEta, fare: routeFare } = route.params;
 
   const [rideStatus, setRideStatus] = useState<'searching' | 'driver_assigned' | 'arriving' | 'arrived' | 'in_progress' | 'completed'>('driver_assigned');
   const [driver, setDriver] = useState<DriverInfo>(() => {
@@ -115,7 +115,7 @@ const ActiveRideScreen = () => {
   const [eta, setEta] = useState(25);
   const [distanceTraveled, setDistanceTraveled] = useState(1.5);
   const [distanceLeft, setDistanceLeft] = useState(3.0);
-  const [fare, setFare] = useState(24.00);
+  const [fare, setFare] = useState(routeFare || 0);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
 
@@ -256,9 +256,9 @@ const ActiveRideScreen = () => {
             text: 'OK',
             onPress: () => {
               navigation.reset({
-                index: 0,
-                routes: [{ name: 'MainTabs' }],
-              });
+              index: 0,
+              routes: [{ name: 'MainTabs' }],
+    });
             },
           },
         ]
@@ -595,11 +595,11 @@ const ActiveRideScreen = () => {
         }}
       >
         {/* Driver Marker */}
-        <Marker coordinate={driver.location}>
+        {driver.location?.latitude && driver.location?.longitude && <Marker coordinate={driver.location}>
           <View style={styles.driverMarker}>
             <Text style={styles.driverMarkerIcon}>🚗</Text>
           </View>
-        </Marker>
+        </Marker>}
 
         {/* Pickup Marker */}
         <Marker coordinate={pickup}>
