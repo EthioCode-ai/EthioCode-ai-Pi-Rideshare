@@ -98,8 +98,7 @@ const DestinationSearchScreen = () => {
       navigation.navigate('RideConfirm', {
         pickup,
         destination,
-        // Pass stop as part of navigation params if needed
-        // stops: stop ? [stop] : [],
+        stops: stop ? [stop] : [],
       });
     }
   };

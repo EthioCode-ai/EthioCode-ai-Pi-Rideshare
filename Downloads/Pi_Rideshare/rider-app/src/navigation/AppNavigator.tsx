@@ -69,6 +69,11 @@ export type RootStackParamList = {
       longitude: number;
       address: string;
     };
+    stops?: {
+      latitude: number;
+      longitude: number;
+      address: string;
+    }[];
     scheduledTime?: string;
   };
   ActiveRide: { 

@@ -46,7 +46,7 @@ const RideConfirmScreen = () => {
   const { colors, isDark } = useTheme();
   const mapRef = useRef<MapView>(null);
 
-  const { pickup, destination } = route.params;
+  const { pickup, destination, stops = [] } = route.params;
  const { user } = useAuth();
 
   // State
@@ -103,20 +103,36 @@ const RideConfirmScreen = () => {
   const fetchEstimates = async () => {
     setLoading(true);
     try {
-      console.log('📊 Fetching estimates for:', JSON.stringify({ pickup, destination }));
+      console.log('📊 Fetching estimates for:', JSON.stringify({ pickup, destination, stops }));
       const result = await rideService.getEstimate(pickup, destination);
       console.log('📊 Estimate API result:', JSON.stringify(result, null, 2));
       if (result.success && result.estimates) {
         console.log('✅ Setting estimates:', result.estimates.length, 'vehicle types');
-        result.estimates.forEach((e: any) => console.log(`   - ${e.vehicleType}: $${e.totalFare}`));
-        setEstimates(result.estimates);
+        
+        // If there are stops, add extra charges
+        let adjustedEstimates = result.estimates;
+        if (stops && stops.length > 0) {
+          const stopCharge = 2.50; // $2.50 per stop
+          const stopTimeCharge = 1.50; // ~3 min wait at $0.50/min
+          const extraPerStop = stopCharge + stopTimeCharge;
+          
+          adjustedEstimates = result.estimates.map((e: any) => ({
+            ...e,
+            totalFare: e.totalFare + (stops.length * extraPerStop),
+            stopCharges: stops.length * extraPerStop,
+          }));
+          console.log(`📍 Added ${stops.length} stop(s) charge: +$${(stops.length * extraPerStop).toFixed(2)}`);
+        }
+        
+        adjustedEstimates.forEach((e: any) => console.log(`   - ${e.vehicleType}: $${e.totalFare?.toFixed(2)}`));
+        setEstimates(adjustedEstimates);
 
-        const currentSurge = result.estimates[0]?.surgeMultiplier || 1;
+        const currentSurge = adjustedEstimates[0]?.surgeMultiplier || 1;
         if (currentSurge > 1.2) {
           setAiRecommendation({
             suggestion: 'Wait 10 min',
-            savings: Math.round((currentSurge - 1) * (result.estimates[0]?.baseFare || 10)),
-            reason: `Surge drops to 1.0x in ~10 min. Save $${Math.round((currentSurge - 1) * (result.estimates[0]?.baseFare || 10))}.`,
+            savings: Math.round((currentSurge - 1) * (adjustedEstimates[0]?.baseFare || 10)),
+            reason: `Surge drops to 1.0x in ~10 min. Save $${Math.round((currentSurge - 1) * (adjustedEstimates[0]?.baseFare || 10))}.`,
           });
         }
       }
@@ -426,6 +442,9 @@ const RideConfirmScreen = () => {
     },
     dotPickup: {
       backgroundColor: colors.primary,
+    },
+    dotStop: {
+      backgroundColor: '#F59E0B',
     },
     dotDest: {
       backgroundColor: colors.secondary,
@@ -842,16 +861,26 @@ const RideConfirmScreen = () => {
             <View style={styles.routeDots}>
               <View style={[styles.dot, styles.dotPickup]} />
               <View style={styles.routeLine} />
+              {stops && stops.length > 0 && (
+                <>
+                  <View style={[styles.dot, styles.dotStop]} />
+                  <View style={styles.routeLine} />
+                </>
+              )}
               <View style={[styles.dot, styles.dotDest]} />
             </View>
             <View style={styles.routeTexts}>
               <Text style={styles.routeText} numberOfLines={1}>{pickup.address}</Text>
+              {stops && stops.map((stop, index) => (
+                <Text key={index} style={[styles.routeText, { color: '#F59E0B' }]} numberOfLines={1}>
+                  {stop.address}
+                </Text>
+              ))}
               <Text style={styles.routeText} numberOfLines={1}>{destination.address}</Text>
             </View>
           </View>
         </View>
-      </View>
-
+     </View>
       {/* Bottom Sheet */}
       <View style={styles.bottomSheet}>
         <View style={styles.handle} />
