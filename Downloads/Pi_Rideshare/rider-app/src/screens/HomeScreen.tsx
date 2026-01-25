@@ -69,6 +69,11 @@ const HomeScreen = () => {
 
   // Initialize socket AFTER location is available
   useEffect(() => {
+    initializeLocation();
+  }, []);
+
+  // Initialize socket AFTER location is available
+  useEffect(() => {
     if (user?.id && currentLocation) {
       socketService.connect(user, currentLocation);
       socketService.startLocationBroadcast(() => currentLocation);
