@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, ActivityIndicator } from 'react-native';
+import CalendarEventsScreen from '../screens/CalendarEventsScreen';
 
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -46,6 +47,7 @@ export type MainTabParamList = {
 
 export type RootStackParamList = {
   MainTabs: undefined;
+  CalendarEvents: undefined;
   DestinationSearch: { 
     pickup?: { latitude: number; longitude: number; address: string };
     selectedLocation?: { latitude: number; longitude: number; address: string };
@@ -192,6 +194,7 @@ const MainNavigator = () => {
         component={DestinationSearchScreen}
         options={{ presentation: 'modal' }}
       />
+     <RootStack.Screen name="CalendarEvents" component={CalendarEventsScreen} options={{ presentation: 'card' }} />
      <RootStack.Screen 
        name="MapPicker" 
        component={MapPickerScreen}

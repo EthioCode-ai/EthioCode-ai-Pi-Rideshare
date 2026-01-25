@@ -533,8 +533,7 @@ const HomeScreen = () => {
        });
    }}
   onCalendarPress={() => {
-    // TODO: Navigate to calendar events screen
-    console.log('Calendar events');
+    navigation.navigate('CalendarEvents');
   }}
   onSetHomeWork={(type) => {
   navigation.navigate('SaveLocation', { type });
