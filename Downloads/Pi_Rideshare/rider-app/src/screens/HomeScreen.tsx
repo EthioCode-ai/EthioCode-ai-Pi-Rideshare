@@ -7,6 +7,7 @@ import {
   Animated,
   Dimensions,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -121,17 +122,21 @@ const HomeScreen = () => {
   setVoiceModalVisible(false);
 
   if (result.action === 'navigate_confirm' && result.destination) {
-    navigation.navigate('RideConfirm', {
-      pickup: {
-        latitude: currentLocation?.latitude || 36.3729,
-        longitude: currentLocation?.longitude || -94.2088,
-        address: currentAddress || 'Current Location',
-      },
-      destination: {
-        latitude: result.destination.latitude,
-        longitude: result.destination.longitude,
-        address: result.destination.address,
-      },
+  if (!currentLocation) {
+    Alert.alert('Location Required', 'Please enable location services to book a ride.');
+    return;
+  }
+  navigation.navigate('RideConfirm', {
+    pickup: {
+      latitude: currentLocation.latitude,
+      longitude: currentLocation.longitude,
+      address: currentAddress || 'Current Location',
+    },
+    destination: {
+      latitude: result.destination.latitude,
+      longitude: result.destination.longitude,
+      address: result.destination.address,
+    },
       scheduledTime: result.scheduledTime?.toISOString(),
     });
   } else if (result.action === 'navigate_search') {
@@ -279,17 +284,34 @@ const HomeScreen = () => {
       elevation: 3,
     },
        riderMarker: {
-      width: 24,
-      height: 24,
-      borderRadius: 12,
-      backgroundColor: '#E67E22',
-      borderWidth: 3,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    riderMarkerInner: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: '#1e3a5f',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
       borderColor: '#FFFFFF',
-      shadowColor: '#E67E22',
-      shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.5,
-      shadowRadius: 10,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
       elevation: 5,
+    },
+    riderMarkerIcon: {
+      fontSize: 14,
+    },
+    riderMarkerPulse: {
+      position: 'absolute',
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(30, 58, 95, 0.2)',
+      zIndex: -1,
     },
     driverMarker: {
       backgroundColor: isDark ? '#1a1a2e' : '#FFFFFF',
@@ -336,19 +358,24 @@ const HomeScreen = () => {
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         customMapStyle={isDark ? darkMapStyle : []}
-        initialRegion={{
-          latitude: currentLocation?.latitude || 36.1540,
-          longitude: currentLocation?.longitude || -94.1861,
-          latitudeDelta: 0.015,
-          longitudeDelta: 0.015,
-        }}
+       region={currentLocation ? {
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+     } : undefined}
         showsUserLocation={false}
         showsMyLocationButton={false}
       >
-        {/* Rider location marker */}
+           {/* Rider location marker */}
         {currentLocation && (
           <Marker coordinate={currentLocation} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.riderMarker} />
+            <View style={styles.riderMarker}>
+              <View style={styles.riderMarkerInner}>
+                <Text style={styles.riderMarkerIcon}>👤</Text>
+              </View>
+              <View style={styles.riderMarkerPulse} />
+            </View>
           </Marker>
         )}
 
