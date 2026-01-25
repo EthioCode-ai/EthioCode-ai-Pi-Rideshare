@@ -14,6 +14,7 @@ import { useTheme } from '../context/ThemeContext';
 import { apiUrl } from '../config/api.config';
 import { StorageKeys } from '../constants';
 import { SavedPlace } from '../types';
+import { aiService, AISuggestion } from '../services/ai.service';
 
 interface RecentPlace {
   id: string;
@@ -49,10 +50,13 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   const [loading, setLoading] = useState(true);
   const [calendarEvents, setCalendarEvents] = useState<number>(0);
   const [calendarSynced, setCalendarSynced] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
+  const [loadingAI, setLoadingAI] = useState(false);
 
   useEffect(() => {
     loadPlaces();
     checkCalendarSync();
+    loadAISuggestions();
   }, []);
 
   const loadPlaces = async () => {
@@ -133,6 +137,20 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
       }
     } catch (error) {
       console.error('Error loading calendar events:', error);
+    }
+  };
+
+  const loadAISuggestions = async () => {
+    try {
+      setLoadingAI(true);
+      const result = await aiService.getSmartSuggestions();
+      if (result.success && result.suggestions) {
+        setAiSuggestions(result.suggestions.slice(0, 3));
+      }
+    } catch (error) {
+      console.error('Error loading AI suggestions:', error);
+    } finally {
+      setLoadingAI(false);
     }
   };
 
@@ -447,17 +465,46 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
         ))}
       </View>
 
-      {/* Recent Places */}
+      {/* AI Smart Suggestions */}
       <View style={styles.sectionHeader}>
-        <Text>🕐</Text>
-        <Text style={styles.sectionTitle}>Recent</Text>
+        <Text>🧠</Text>
+        <Text style={styles.sectionTitle}>Suggested for You</Text>
       </View>
 
-      {loading ? (
+      {loadingAI || loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={colors.primary} />
         </View>
+      ) : aiSuggestions.length > 0 ? (
+        aiSuggestions.map((suggestion, index) => (
+          <TouchableOpacity
+            key={index}
+            style={styles.recentItem}
+            onPress={() => onQuickDestination({
+              latitude: suggestion.latitude,
+              longitude: suggestion.longitude,
+              address: suggestion.address,
+              name: suggestion.name,
+            })}
+          >
+            <View style={[styles.recentIcon, { backgroundColor: suggestion.confidence === 'high' ? `${colors.primary}20` : colors.inputBackground }]}>
+              <Text style={styles.recentIconText}>
+                {suggestion.confidence === 'high' ? '⭐' : suggestion.confidence === 'medium' ? '📍' : '🔮'}
+              </Text>
+            </View>
+            <View style={styles.recentInfo}>
+              <Text style={styles.recentName}>{suggestion.name}</Text>
+              <Text style={styles.recentAddress} numberOfLines={1}>{suggestion.reason}</Text>
+            </View>
+            {currentLocation && (
+              <Text style={styles.recentEta}>
+                {calculateETA(suggestion.latitude, suggestion.longitude)}
+              </Text>
+            )}
+          </TouchableOpacity>
+        ))
       ) : recentPlaces.length > 0 ? (
+        // Fallback to recent places if no AI suggestions
         recentPlaces.map((place) => (
           <TouchableOpacity
             key={place.id}
@@ -480,7 +527,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
         ))
       ) : (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No recent rides yet</Text>
+          <Text style={styles.emptyText}>Take a ride to get personalized suggestions</Text>
         </View>
       )}
     </View>

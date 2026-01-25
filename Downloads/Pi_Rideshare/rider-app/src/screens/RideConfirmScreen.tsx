@@ -24,6 +24,7 @@ import { useAuth } from '../context/AuthContext';
 import { VehicleInfo } from '../constants';
 import { RideEstimate } from '../types';
 import SchedulePicker from '../components/SchedulePicker';
+import { aiService } from '../services/ai.service';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'RideConfirm'>;
 type RouteProps = RouteProp<RootStackParamList, 'RideConfirm'>;
@@ -127,19 +128,44 @@ const RideConfirmScreen = () => {
         adjustedEstimates.forEach((e: any) => console.log(`   - ${e.vehicleType}: $${e.totalFare?.toFixed(2)}`));
         setEstimates(adjustedEstimates);
 
-        const currentSurge = adjustedEstimates[0]?.surgeMultiplier || 1;
-        if (currentSurge > 1.2) {
-          setAiRecommendation({
-            suggestion: 'Wait 10 min',
-            savings: Math.round((currentSurge - 1) * (adjustedEstimates[0]?.baseFare || 10)),
-            reason: `Surge drops to 1.0x in ~10 min. Save $${Math.round((currentSurge - 1) * (adjustedEstimates[0]?.baseFare || 10))}.`,
-          });
-        }
+        // Fetch AI recommendation
+        fetchAIRecommendation();
       }
     } catch (error) {
       console.error('Error fetching estimates:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAIRecommendation = async () => {
+    try {
+      const result = await aiService.getRideRecommendation(pickup, destination);
+      if (result.success && result.recommendation) {
+        const rec = result.recommendation;
+        
+        // Only show recommendation if there's potential savings or surge
+        if (rec.waitTimeMinutes > 0 && rec.potentialSavings > 1) {
+          setAiRecommendation({
+            suggestion: rec.suggestedDeparture === 'now' ? 'Ride now' : `Wait ${rec.waitTimeMinutes} min`,
+            savings: rec.potentialSavings,
+            reason: rec.reason,
+          });
+        } else if (rec.predictedSurge > 1.2) {
+          setAiRecommendation({
+            suggestion: `Wait ${rec.waitTimeMinutes || 10} min`,
+            savings: rec.potentialSavings || Math.round((rec.predictedSurge - 1) * 10),
+            reason: `Surge is ${rec.predictedSurge}x. ${rec.reason}`,
+          });
+        } else {
+          // Clear any existing recommendation if conditions are good
+          setAiRecommendation(null);
+        }
+        
+        console.log('🧠 AI Recommendation:', rec);
+      }
+    } catch (error) {
+      console.error('Error fetching AI recommendation:', error);
     }
   };
 

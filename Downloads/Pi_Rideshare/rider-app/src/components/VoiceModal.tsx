@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 
 import { useTheme } from '../context/ThemeContext';
 import { voiceAIService, VoiceCommandResult } from '../services/voice-ai.service';
+import { aiService } from '../services/ai.service';
 
 interface VoiceModalProps {
   visible: boolean;
@@ -184,9 +185,105 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     await saveCommandToHistory(promptText);
 
     try {
+      // Try backend AI first
+      const aiResult = await aiService.processVoiceCommand(promptText);
+      
+      if (aiResult.success && aiResult.command) {
+        const cmd = aiResult.command;
+        setResponse(cmd.response);
+        await voiceAIService.speak(cmd.response);
+
+        // Map AI response to VoiceCommandResult
+        if (cmd.type === 'go_to' || cmd.type === 'book_ride') {
+          if (cmd.destination) {
+            // Check if it's airport
+            if (cmd.destination.toLowerCase().includes('airport')) {
+              const airports = await voiceAIService.findNearbyAirports(
+                userLocation?.latitude || 36.3729,
+                userLocation?.longitude || -94.2088
+              );
+              
+              if (airports.length > 1) {
+                setPendingResult({
+                  type: 'clarify_airport',
+                  response: cmd.response,
+                  action: 'show_options',
+                  options: airports.slice(0, 2),
+                });
+                setAirportOptions(airports.slice(0, 2));
+                setModalState('selecting');
+                return;
+              } else if (airports.length === 1) {
+                const result: VoiceCommandResult = {
+                  type: 'book_ride',
+                  destination: {
+                    name: airports[0].name,
+                    address: airports[0].address,
+                    latitude: airports[0].latitude,
+                    longitude: airports[0].longitude,
+                  },
+                  response: cmd.response,
+                  action: 'navigate_confirm',
+                  requiresConfirmation: true,
+                };
+                setPendingResult(result);
+                setModalState('confirming');
+                return;
+              }
+            }
+            
+            // Generic destination - go to search
+            const result: VoiceCommandResult = {
+              type: 'book_ride',
+              response: cmd.response,
+              action: 'navigate_search',
+            };
+            setModalState('responding');
+            setTimeout(() => navigateToConfirm(result), 1500);
+            return;
+          }
+        } else if (cmd.type === 'schedule' && cmd.time) {
+          const scheduledTime = voiceAIService.parseTimeFromCommand(cmd.time);
+          if (scheduledTime) {
+            const result: VoiceCommandResult = {
+              type: 'schedule_ride',
+              scheduledTime,
+              response: cmd.response,
+              action: 'navigate_search',
+            };
+            setModalState('responding');
+            setTimeout(() => navigateToConfirm(result), 1500);
+            return;
+          }
+        } else if (cmd.type === 'check_surge') {
+          // Get real surge prediction
+          const surgeResult = await aiService.getSurgePrediction(
+            userLocation?.latitude || 36.3729,
+            userLocation?.longitude || -94.2088
+          );
+          
+          if (surgeResult.success && surgeResult.prediction) {
+            const p = surgeResult.prediction;
+            const surgeMsg = p.currentSurge > 1 
+              ? `Current surge is ${p.currentSurge}x. ${p.bestTimeToRide === 'now' ? "It's a good time to ride!" : `Wait ${p.bestTimeToRide} to save $${p.savings}.`}`
+              : "No surge right now! It's a great time to ride.";
+            setResponse(surgeMsg);
+            await voiceAIService.speak(surgeMsg);
+          }
+          setModalState('responding');
+          setTimeout(() => onCloseRef.current(), 3000);
+          return;
+        }
+
+        // Default - just show response
+        setModalState('responding');
+        setTimeout(() => onCloseRef.current(), 2500);
+        return;
+      }
+
+      // Fallback to local processing if AI fails
       const result = await voiceAIService.processCommand(promptText, userLocation);
       setResponse(result.response);
-      
       await voiceAIService.speak(result.response);
 
       if (result.action === 'show_options' && result.options && result.options.length > 0) {
