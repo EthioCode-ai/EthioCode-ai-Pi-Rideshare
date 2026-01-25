@@ -8,6 +8,7 @@ import {
   FlatList,
   ActivityIndicator,
   Keyboard,
+  KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
   UIManager,
@@ -632,8 +633,13 @@ const DestinationSearchScreen = () => {
     </TouchableOpacity>
   );
 
-  return (
+    return (
     <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
       {/* Ready Banner */}
       {canConfirm && (
         <View style={styles.readyBanner}>
@@ -819,6 +825,7 @@ const DestinationSearchScreen = () => {
           }
         />
       )}
+    </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };

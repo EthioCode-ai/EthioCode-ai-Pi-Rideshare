@@ -33,26 +33,22 @@ class PlacesService {
 
     try {
       const token = await this.getToken();
-      const params = new URLSearchParams({
-        input,
-        ...(location && {
-          latitude: location.latitude.toString(),
-          longitude: location.longitude.toString(),
-        }),
-      });
+      let url = `api/places/autocomplete?input=${encodeURIComponent(input)}`;
+      
+      if (location) {
+        url += `&latitude=${location.latitude}&longitude=${location.longitude}`;
+      }
 
-      const response = await fetch(apiUrl(`api/places/autocomplete?${params}`), {
+      const response = await fetch(apiUrl(url), {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
 
       const data = await response.json();
-
       if (response.ok && data.predictions) {
         return data.predictions;
       }
-
       return [];
     } catch (error) {
       console.error('Autocomplete error:', error);
@@ -71,11 +67,9 @@ class PlacesService {
       });
 
       const data = await response.json();
-
       if (response.ok && data.place) {
         return data.place;
       }
-
       return null;
     } catch (error) {
       console.error('Place details error:', error);
@@ -100,11 +94,9 @@ class PlacesService {
       );
 
       const data = await response.json();
-
       if (response.ok && data.address) {
         return data.address;
       }
-
       return 'Unknown location';
     } catch (error) {
       console.error('Reverse geocode error:', error);

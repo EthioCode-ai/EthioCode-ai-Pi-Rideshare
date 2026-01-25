@@ -118,35 +118,42 @@ class VoiceAIService {
     }
   }
 
-  // Find airports near user using Google Places API
+  // Find airports near user using Google Places API - limited to 100km radius
   async findNearbyAirports(
     userLat: number,
     userLng: number
-  ): Promise<Array<{ name: string; address: string; latitude: number; longitude: number; placeId: string }>> {
+  ): Promise<Array<{ name: string; address: string; latitude: number; longitude: number; placeId: string; distance: number }>> {
     try {
+      console.log('✈️ Finding airports near:', userLat, userLng);
+      
       // Use Places autocomplete with "airport" query biased to user location
       const results = await placesService.autocomplete('airport', { latitude: userLat, longitude: userLng });
 
-      // Filter to only airport-related results and get details for top 3
+      console.log('✈️ Autocomplete results:', results.length);
+
+      // Filter to only airport-related results
       const airportResults = results
-        .filter(r => 
+        .filter(r =>
           r.description.toLowerCase().includes('airport') ||
           r.mainText.toLowerCase().includes('airport')
         )
-        .slice(0, 3);
+        .slice(0, 5);
 
-      // Get full details for each airport
+      // Get full details for each airport and calculate distance
       const airportsWithDetails = await Promise.all(
         airportResults.map(async (result) => {
           try {
             const details = await placesService.getPlaceDetails(result.placeId);
             if (details) {
+              // Calculate distance from user
+              const distance = this.calculateDistanceKm(userLat, userLng, details.latitude, details.longitude);
               return {
                 name: result.mainText,
                 address: details.address,
                 latitude: details.latitude,
                 longitude: details.longitude,
                 placeId: result.placeId,
+                distance,
               };
             }
           } catch (e) {
@@ -156,11 +163,30 @@ class VoiceAIService {
         })
       );
 
-      return airportsWithDetails.filter((a): a is NonNullable<typeof a> => a !== null);
+      // Filter out nulls and airports beyond 100km, then sort by distance
+      const validAirports = airportsWithDetails
+        .filter((a): a is NonNullable<typeof a> => a !== null && a.distance <= 100)
+        .sort((a, b) => a.distance - b.distance);
+
+      console.log('✈️ Valid airports within 100km:', validAirports.map(a => `${a.name} (${a.distance.toFixed(1)}km)`));
+
+      return validAirports.slice(0, 3); // Return closest 3
     } catch (error) {
       console.error('Error finding airports:', error);
       return [];
     }
+  }
+
+  // Calculate distance between two points in km
+  private calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   }
 
   // Main command processor
