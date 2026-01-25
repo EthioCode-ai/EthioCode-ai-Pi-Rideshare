@@ -174,44 +174,52 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
       
       const allSuggestions: AISuggestion[] = [];
       
-      for (const category of categories) {
+for (const category of categories) {
         try {
+          console.log(`🔍 Searching for: ${category} near ${currentLocation.latitude}, ${currentLocation.longitude}`);
+          
           const results = await placesService.autocomplete(category, {
             latitude: currentLocation.latitude,
             longitude: currentLocation.longitude,
           });
           
+          console.log(`📍 Got ${results.length} results for ${category}`);
+          
           if (results && results.length > 0) {
-            // Find a result that's actually nearby (check description for proximity keywords)
-            for (const result of results.slice(0, 3)) {
-              const details = await placesService.getPlaceDetails(result.placeId);
-              
-              if (details) {
-                // Calculate distance
-                const distance = calculateDistanceKm(
-                  currentLocation.latitude,
-                  currentLocation.longitude,
-                  details.latitude,
-                  details.longitude
-                );
-                
-                // Only include if within 15km (~10 miles)
-                if (distance <= 20) {
-                  allSuggestions.push({
-                    name: result.mainText,
-                    address: details.address,
-                    latitude: details.latitude,
-                    longitude: details.longitude,
-                    reason: getCategoryReason(category),
-                    confidence: distance <= 5 ? 'high' as const : 'medium' as const,
-                  });
-                  break; // Got one for this category
+            // Check up to 5 results to find one within range
+            for (const result of results.slice(0, 5)) {
+              try {
+                const details = await placesService.getPlaceDetails(result.placeId);
+                if (details) {
+                  const distance = calculateDistanceKm(
+                    currentLocation.latitude,
+                    currentLocation.longitude,
+                    details.latitude,
+                    details.longitude
+                  );
+                  
+                  console.log(`   - ${result.mainText}: ${distance.toFixed(1)}km`);
+                  
+                  // Include if within 50km
+                  if (distance <= 50) {
+                    allSuggestions.push({
+                      name: result.mainText,
+                      address: details.address,
+                      latitude: details.latitude,
+                      longitude: details.longitude,
+                      reason: getCategoryReason(category),
+                      confidence: distance <= 5 ? 'high' as const : distance <= 15 ? 'medium' as const : 'low' as const,
+                    });
+                    break; // Got one for this category
+                  }
                 }
+              } catch (detailErr) {
+                console.log(`   ⚠️ Could not get details for ${result.mainText}`);
               }
             }
           }
         } catch (err) {
-          console.log(`Could not fetch ${category}:`, err);
+          console.log(`❌ Could not fetch ${category}:`, err);
         }
       }
       

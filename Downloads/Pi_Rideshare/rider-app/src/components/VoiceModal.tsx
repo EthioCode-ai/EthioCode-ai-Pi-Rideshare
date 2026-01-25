@@ -463,13 +463,15 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     setTimeout(() => onCloseRef.current(), 1000);
   };
 
-  const handleMicPress = () => {
-    if (modalState === 'listening') {
-      startTimeout();
-    } else if (modalState === 'idle') {
-      setModalState('listening');
+    const handleMicPress = async () => {
+    if (isRecording) {
+      // Stop recording and process
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      await stopRecordingAndProcess();
+    } else {
+      // Start recording
+      await startRecording();
       startPulseAnimation();
-      startTimeout();
     }
   };
 

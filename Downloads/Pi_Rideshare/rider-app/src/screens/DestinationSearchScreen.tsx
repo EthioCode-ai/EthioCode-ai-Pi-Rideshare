@@ -25,6 +25,8 @@ import { placesService, PlacePrediction } from '../services/places.service';
 import { locationService } from '../services/location.service';
 import { StorageKeys } from '../constants';
 import { SavedPlace } from '../types';
+import * as Location from 'expo-location';
+
 
 // Enable LayoutAnimation for Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -68,6 +70,7 @@ const DestinationSearchScreen = () => {
   const [gettingCurrentLocation, setGettingCurrentLocation] = useState(false);
   const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]);
   const [showAddStop, setShowAddStop] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState<{latitude: number; longitude: number} | null>(null);
 
   // Handle returned location from MapPickerScreen
   useEffect(() => {
@@ -104,12 +107,28 @@ const DestinationSearchScreen = () => {
     }
   };
 
-  useEffect(() => {
+   useEffect(() => {
     loadSavedPlaces();
+    fetchCurrentLocation();
     if (!initialPickup) {
       getCurrentLocation();
     }
   }, []);
+
+  const fetchCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({});
+        setCurrentLocation({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching location:', error);
+    }
+  };
 
   const loadSavedPlaces = async () => {
     try {
@@ -153,12 +172,15 @@ const DestinationSearchScreen = () => {
         setLoading(false);
         return;
       }
-
       try {
-        const results = await placesService.autocomplete(text, pickup ? {
-          latitude: pickup.latitude,
-          longitude: pickup.longitude,
-        } : undefined);
+        // Use pickup location, or fallback to current GPS
+        const locationBias = pickup 
+          ? { latitude: pickup.latitude, longitude: pickup.longitude }
+          : currentLocation 
+            ? { latitude: currentLocation.latitude, longitude: currentLocation.longitude }
+            : undefined;
+        
+        const results = await placesService.autocomplete(text, locationBias);
         setPredictions(results);
       } catch (error) {
         console.error('Search error:', error);
@@ -611,6 +633,7 @@ const DestinationSearchScreen = () => {
       fontSize: 16,
       color: '#10B981',
     },
+    
     readyBannerText: {
       fontSize: 14,
       fontWeight: '700',
@@ -733,7 +756,29 @@ const DestinationSearchScreen = () => {
               </TouchableOpacity>
             </View>
           )}
+     {/* Dismiss Keyboard Button */}
+          {(pickupText.length > 0 || destinationText.length > 0 || stopText.length > 0) && (
+            <TouchableOpacity 
+              style={{
+                backgroundColor: isDark ? '#E67E22' : '#2563eb',
+                paddingVertical: 12,
+                paddingHorizontal: 20,
+                borderRadius: 10,
+                marginHorizontal: 20,
+                marginTop: 10,
+                alignItems: 'center' as const,
+              }} 
+              onPress={() => Keyboard.dismiss()}
+            >
+              <Text style={{
+                color: '#FFFFFF',
+                fontSize: 14,
+                fontWeight: '700' as const,
+              }}>Done - Show Results ▼</Text>
+            </TouchableOpacity>
+          )}
 
+          <View style={styles.quickActions}></View>
           <View style={styles.quickActions}>
             <TouchableOpacity style={styles.quickAction} onPress={handleUseCurrentLocation}>
               <Text>📍</Text>
