@@ -64,17 +64,7 @@ const HomeScreen = () => {
 
   
 
-  // Animation for voice button
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    initializeLocation();
-    startPulseAnimation();
-    return () => {
-      locationService.stopWatching();
-      socketService.disconnect();
-    };
-  }, []);
+  
 
   // Initialize socket AFTER location is available
   useEffect(() => {
@@ -120,22 +110,7 @@ const HomeScreen = () => {
     }
   };
 
-  const startPulseAnimation = () => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  };
+
 
   const handleVoicePress = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -303,52 +278,7 @@ const HomeScreen = () => {
       shadowRadius: 4,
       elevation: 3,
     },
-    voiceButtonContainer: {
-      position: 'absolute',
-      bottom: 300,
-      alignSelf: 'center',
-      alignItems: 'center',
-    },
-    voiceHint: {
-      backgroundColor: isDark ? '#1a1a2e' : '#FFFFFF',
-      paddingHorizontal: 18,
-      paddingVertical: 10,
-      borderRadius: 20,
-      marginBottom: 12,
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
-    },
-    voiceHintText: {
-      fontSize: 13,
-      fontWeight: '500',
-      color: isDark ? '#B0B0B0' : '#666666',
-    },
-    voiceHintHighlight: {
-      color: '#E67E22',
-      fontWeight: '700',
-    },
-    voiceButton: {
-      width: 70,
-      height: 70,
-      borderRadius: 35,
-      backgroundColor: '#E67E22',
-      justifyContent: 'center',
-      alignItems: 'center',
-      shadowColor: '#E67E22',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.4,
-      shadowRadius: 12,
-      elevation: 8,
-    },
-    voiceButtonIcon: {
-      fontSize: 30,
-    },
-    riderMarker: {
+       riderMarker: {
       width: 24,
       height: 24,
       borderRadius: 12,
@@ -491,20 +421,7 @@ const HomeScreen = () => {
         <Text style={styles.mapButtonText}>📍</Text>
       </TouchableOpacity>
 
-      {/* Voice Button */}
-      <View style={styles.voiceButtonContainer}>
-        <View style={styles.voiceHint}>
-          <Text style={styles.voiceHintText}>
-            Tap to speak: <Text style={styles.voiceHintHighlight}>"Take me to the airport"</Text>
-          </Text>
-        </View>
-        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-          <TouchableOpacity style={styles.voiceButton} onPress={handleVoicePress}>
-            <Text style={styles.voiceButtonIcon}>🎤</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </View>
-
+      
 {/* Scheduled Rides */}
 <ScheduledRides
   onRidePress={(ride) => {

@@ -55,6 +55,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   const [calendarSynced, setCalendarSynced] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
   const [loadingAI, setLoadingAI] = useState(false);
+  const [suggestionsExpanded, setSuggestionsExpanded] = useState(true);
 
   useEffect(() => {
     loadPlaces();
@@ -148,14 +149,29 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
     }
   };
 
-  const loadAISuggestions = async () => {
+ const loadAISuggestions = async () => {
     if (!currentLocation) return;
     
     try {
       setLoadingAI(true);
       
       // Get popular nearby places using Google Places API
-      const categories = ['restaurant', 'coffee', 'shopping mall'];
+      const hour = new Date().getHours();
+      
+      // Choose categories based on time of day
+      let categories: string[] = [];
+      if (hour >= 6 && hour < 11) {
+        categories = ['coffee shop near me', 'breakfast near me', 'gas station near me'];
+      } else if (hour >= 11 && hour < 15) {
+        categories = ['lunch near me', 'restaurant near me', 'fast food near me'];
+      } else if (hour >= 15 && hour < 18) {
+        categories = ['coffee near me', 'shopping near me', 'grocery store near me'];
+      } else if (hour >= 18 && hour < 22) {
+        categories = ['dinner near me', 'restaurant near me', 'bar near me'];
+      } else {
+        categories = ['24 hour pharmacy near me', 'gas station near me', 'convenience store near me'];
+      }
+      
       const allSuggestions: AISuggestion[] = [];
       
       for (const category of categories) {
@@ -166,18 +182,32 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
           });
           
           if (results && results.length > 0) {
-            const topResult = results[0];
-            const details = await placesService.getPlaceDetails(topResult.placeId);
-            
-            if (details) {
-              allSuggestions.push({
-                name: topResult.mainText,
-                address: details.address,
-                latitude: details.latitude,
-                longitude: details.longitude,
-                reason: getCategoryReason(category),
-                confidence: 'high' as const,
-              });
+            // Find a result that's actually nearby (check description for proximity keywords)
+            for (const result of results.slice(0, 3)) {
+              const details = await placesService.getPlaceDetails(result.placeId);
+              
+              if (details) {
+                // Calculate distance
+                const distance = calculateDistanceKm(
+                  currentLocation.latitude,
+                  currentLocation.longitude,
+                  details.latitude,
+                  details.longitude
+                );
+                
+                // Only include if within 15km (~10 miles)
+                if (distance <= 15) {
+                  allSuggestions.push({
+                    name: result.mainText,
+                    address: details.address,
+                    latitude: details.latitude,
+                    longitude: details.longitude,
+                    reason: getCategoryReason(category),
+                    confidence: distance <= 5 ? 'high' as const : 'medium' as const,
+                  });
+                  break; // Got one for this category
+                }
+              }
             }
           }
         } catch (err) {
@@ -185,7 +215,12 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
         }
       }
       
-      setAiSuggestions(allSuggestions.slice(0, 3));
+      // Remove duplicates by name
+      const uniqueSuggestions = allSuggestions.filter(
+        (s, i, arr) => arr.findIndex(x => x.name === s.name) === i
+      );
+      
+      setAiSuggestions(uniqueSuggestions.slice(0, 3));
     } catch (error) {
       console.error('Error loading suggestions:', error);
     } finally {
@@ -193,21 +228,36 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
     }
   };
 
-  const getCategoryReason = (category: string): string => {
+  const calculateDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+ 
+ const getCategoryReason = (category: string): string => {
     const hour = new Date().getHours();
-    switch (category) {
-      case 'restaurant':
-        if (hour >= 11 && hour <= 14) return 'Lunchtime nearby';
-        if (hour >= 17 && hour <= 21) return 'Dinner spot nearby';
-        return 'Popular restaurant nearby';
-      case 'coffee':
-        if (hour >= 6 && hour <= 11) return 'Morning coffee run';
-        return 'Nearby café';
-      case 'shopping mall':
-        return 'Shopping nearby';
-      default:
-        return 'Popular nearby';
+    if (category.includes('coffee') || category.includes('breakfast')) {
+      return 'Morning pick-me-up ☕';
+    } else if (category.includes('lunch') || category.includes('fast food')) {
+      return 'Lunch spot nearby 🍽️';
+    } else if (category.includes('dinner') || category.includes('restaurant')) {
+      return hour >= 18 ? 'Dinner nearby 🍽️' : 'Popular restaurant';
+    } else if (category.includes('shopping') || category.includes('grocery')) {
+      return 'Shopping nearby 🛒';
+    } else if (category.includes('gas')) {
+      return 'Gas station ⛽';
+    } else if (category.includes('bar')) {
+      return 'Evening spot 🍸';
+    } else if (category.includes('pharmacy') || category.includes('convenience')) {
+      return 'Open late 🌙';
     }
+    return 'Popular nearby';
   };
 
   const handleCalendarSync = async () => {
@@ -488,6 +538,11 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
       paddingVertical: 20,
       alignItems: 'center',
     },
+    expandIcon: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginLeft: 'auto',
+    },
   });
 
   return (
@@ -527,70 +582,77 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
         ))}
       </View>
 
-      {/* AI Smart Suggestions */}
-      <View style={styles.sectionHeader}>
+      {/* AI Smart Suggestions - Collapsible */}
+      <TouchableOpacity 
+        style={styles.sectionHeader} 
+        onPress={() => setSuggestionsExpanded(!suggestionsExpanded)}
+      >
         <Text>🧠</Text>
         <Text style={styles.sectionTitle}>Suggested for You</Text>
-      </View>
+        <Text style={styles.expandIcon}>{suggestionsExpanded ? '▼' : '▶'}</Text>
+      </TouchableOpacity>
 
-      {loadingAI || loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
-      ) : aiSuggestions.length > 0 ? (
-        aiSuggestions.map((suggestion, index) => (
-          <TouchableOpacity
-            key={index}
-            style={styles.recentItem}
-            onPress={() => onQuickDestination({
-              latitude: suggestion.latitude,
-              longitude: suggestion.longitude,
-              address: suggestion.address,
-              name: suggestion.name,
-            })}
-          >
-            <View style={[styles.recentIcon, { backgroundColor: suggestion.confidence === 'high' ? `${colors.primary}20` : colors.inputBackground }]}>
-              <Text style={styles.recentIconText}>
-                {suggestion.confidence === 'high' ? '⭐' : suggestion.confidence === 'medium' ? '📍' : '🔮'}
-              </Text>
+      {suggestionsExpanded && (
+        <>
+          {loadingAI || loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator color={colors.primary} />
             </View>
-            <View style={styles.recentInfo}>
-              <Text style={styles.recentName}>{suggestion.name}</Text>
-              <Text style={styles.recentAddress} numberOfLines={1}>{suggestion.reason}</Text>
+          ) : aiSuggestions.length > 0 ? (
+            aiSuggestions.map((suggestion, index) => (
+              <TouchableOpacity
+                key={index}
+                style={styles.recentItem}
+                onPress={() => onQuickDestination({
+                  latitude: suggestion.latitude,
+                  longitude: suggestion.longitude,
+                  address: suggestion.address,
+                  name: suggestion.name,
+                })}
+              >
+                <View style={[styles.recentIcon, { backgroundColor: suggestion.confidence === 'high' ? `${colors.primary}20` : colors.inputBackground }]}>
+                  <Text style={styles.recentIconText}>
+                    {suggestion.confidence === 'high' ? '⭐' : suggestion.confidence === 'medium' ? '📍' : '🔮'}
+                  </Text>
+                </View>
+                <View style={styles.recentInfo}>
+                  <Text style={styles.recentName}>{suggestion.name}</Text>
+                  <Text style={styles.recentAddress} numberOfLines={1}>{suggestion.reason}</Text>
+                </View>
+                {currentLocation && (
+                  <Text style={styles.recentEta}>
+                    {calculateETA(suggestion.latitude, suggestion.longitude)}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            ))
+          ) : recentPlaces.length > 0 ? (
+            recentPlaces.map((place) => (
+              <TouchableOpacity
+                key={place.id}
+                style={styles.recentItem}
+                onPress={() => handleQuickDestPress(place)}
+              >
+                <View style={styles.recentIcon}>
+                  <Text style={styles.recentIconText}>{place.icon}</Text>
+                </View>
+                <View style={styles.recentInfo}>
+                  <Text style={styles.recentName}>{place.name}</Text>
+                  <Text style={styles.recentAddress} numberOfLines={1}>{place.address}</Text>
+                </View>
+                {currentLocation && (
+                  <Text style={styles.recentEta}>
+                    {calculateETA(place.latitude, place.longitude)}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            ))
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Take a ride to get personalized suggestions</Text>
             </View>
-            {currentLocation && (
-              <Text style={styles.recentEta}>
-                {calculateETA(suggestion.latitude, suggestion.longitude)}
-              </Text>
-            )}
-          </TouchableOpacity>
-        ))
-      ) : recentPlaces.length > 0 ? (
-        // Fallback to recent places if no AI suggestions
-        recentPlaces.map((place) => (
-          <TouchableOpacity
-            key={place.id}
-            style={styles.recentItem}
-            onPress={() => handleQuickDestPress(place)}
-          >
-            <View style={styles.recentIcon}>
-              <Text style={styles.recentIconText}>{place.icon}</Text>
-            </View>
-            <View style={styles.recentInfo}>
-              <Text style={styles.recentName}>{place.name}</Text>
-              <Text style={styles.recentAddress} numberOfLines={1}>{place.address}</Text>
-            </View>
-            {currentLocation && (
-              <Text style={styles.recentEta}>
-                {calculateETA(place.latitude, place.longitude)}
-              </Text>
-            )}
-          </TouchableOpacity>
-        ))
-      ) : (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>Take a ride to get personalized suggestions</Text>
-        </View>
+          )}
+        </>
       )}
     </View>
   );
