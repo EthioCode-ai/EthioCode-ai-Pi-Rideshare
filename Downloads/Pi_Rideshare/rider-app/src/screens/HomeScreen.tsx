@@ -518,27 +518,28 @@ const HomeScreen = () => {
         currentAddress={currentAddress}
         currentLocation={currentLocation}
         onSearchPress={handleSearchPress}
+        onVoicePress={handleVoicePress}
         onQuickDestination={(dest) => {
-        navigation.navigate('RideConfirm', {
-          pickup: {
-           latitude: currentLocation?.latitude || 0,
-           longitude: currentLocation?.longitude || 0,
-           address: currentAddress,
-        },
-         destination: {
-           latitude: dest.latitude,
-           longitude: dest.longitude,
-           address: dest.address,
-        },
-       });
-   }}
-  onCalendarPress={() => {
-    navigation.navigate('CalendarEvents');
-  }}
-  onSetHomeWork={(type) => {
-  navigation.navigate('SaveLocation', { type });
-}}
-/>
+          navigation.navigate('RideConfirm', {
+            pickup: {
+              latitude: currentLocation?.latitude || 0,
+              longitude: currentLocation?.longitude || 0,
+              address: currentAddress,
+            },
+            destination: {
+              latitude: dest.latitude,
+              longitude: dest.longitude,
+              address: dest.address,
+            },
+          });
+        }}
+        onCalendarPress={() => {
+          navigation.navigate('CalendarEvents');
+        }}
+        onSetHomeWork={(type) => {
+          navigation.navigate('SaveLocation', { type });
+        }}
+      />
 
       {/* Voice Modal */}
       <VoiceModal

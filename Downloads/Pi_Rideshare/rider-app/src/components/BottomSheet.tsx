@@ -15,6 +15,7 @@ import { apiUrl } from '../config/api.config';
 import { StorageKeys } from '../constants';
 import { SavedPlace } from '../types';
 import { aiService, AISuggestion } from '../services/ai.service';
+import { placesService } from '../services/places.service';
 
 interface RecentPlace {
   id: string;
@@ -30,6 +31,7 @@ interface BottomSheetProps {
   currentAddress: string;
   currentLocation: { latitude: number; longitude: number } | null;
   onSearchPress: () => void;
+  onVoicePress: () => void;
   onQuickDestination: (destination: { latitude: number; longitude: number; address: string; name: string }) => void;
   onCalendarPress: () => void;
   onSetHomeWork?: (type: 'home' | 'work') => void;
@@ -39,6 +41,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   currentAddress,
   currentLocation,
   onSearchPress,
+  onVoicePress,
   onQuickDestination,
   onCalendarPress,
   onSetHomeWork,
@@ -56,8 +59,13 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   useEffect(() => {
     loadPlaces();
     checkCalendarSync();
-    loadAISuggestions();
   }, []);
+
+  useEffect(() => {
+    if (currentLocation) {
+      loadAISuggestions();
+    }
+  }, [currentLocation]);
 
   const loadPlaces = async () => {
     try {
@@ -141,16 +149,64 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   };
 
   const loadAISuggestions = async () => {
+    if (!currentLocation) return;
+    
     try {
       setLoadingAI(true);
-      const result = await aiService.getSmartSuggestions();
-      if (result.success && result.suggestions) {
-        setAiSuggestions(result.suggestions.slice(0, 3));
+      
+      // Get popular nearby places using Google Places API
+      const categories = ['restaurant', 'coffee', 'shopping mall'];
+      const allSuggestions: AISuggestion[] = [];
+      
+      for (const category of categories) {
+        try {
+          const results = await placesService.autocomplete(category, {
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude,
+          });
+          
+          if (results && results.length > 0) {
+            const topResult = results[0];
+            const details = await placesService.getPlaceDetails(topResult.placeId);
+            
+            if (details) {
+              allSuggestions.push({
+                name: topResult.mainText,
+                address: details.address,
+                latitude: details.latitude,
+                longitude: details.longitude,
+                reason: getCategoryReason(category),
+                confidence: 'high' as const,
+              });
+            }
+          }
+        } catch (err) {
+          console.log(`Could not fetch ${category}:`, err);
+        }
       }
+      
+      setAiSuggestions(allSuggestions.slice(0, 3));
     } catch (error) {
-      console.error('Error loading AI suggestions:', error);
+      console.error('Error loading suggestions:', error);
     } finally {
       setLoadingAI(false);
+    }
+  };
+
+  const getCategoryReason = (category: string): string => {
+    const hour = new Date().getHours();
+    switch (category) {
+      case 'restaurant':
+        if (hour >= 11 && hour <= 14) return 'Lunchtime nearby';
+        if (hour >= 17 && hour <= 21) return 'Dinner spot nearby';
+        return 'Popular restaurant nearby';
+      case 'coffee':
+        if (hour >= 6 && hour <= 11) return 'Morning coffee run';
+        return 'Nearby café';
+      case 'shopping mall':
+        return 'Shopping nearby';
+      default:
+        return 'Popular nearby';
     }
   };
 
@@ -307,13 +363,17 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
       alignSelf: 'center',
       marginBottom: 16,
     },
-    searchCard: {
-      backgroundColor: colors.inputBackground,
-      borderRadius: 12,
-      padding: 14,
+    searchRow: {
       flexDirection: 'row',
       alignItems: 'center',
       marginBottom: 16,
+      gap: 10,
+    },
+    searchCard: {
+      flex: 1,
+      backgroundColor: colors.inputBackground,
+      borderRadius: 12,
+      padding: 14,
       borderWidth: 1,
       borderColor: colors.inputBorder,
     },
@@ -435,12 +495,14 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
       <View style={styles.handle} />
 
       {/* Search Bar */}
-      <TouchableOpacity style={styles.searchCard} onPress={onSearchPress}>
-        <Text style={styles.searchText}>Where to?</Text>
-        <View style={styles.voiceSearchButton}>
+      <View style={styles.searchRow}>
+        <TouchableOpacity style={styles.searchCard} onPress={onSearchPress}>
+          <Text style={styles.searchText}>Where to?</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.voiceSearchButton} onPress={onVoicePress}>
           <Text style={styles.voiceSearchIcon}>🎤</Text>
-        </View>
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </View>
 
       {/* Quick Destinations */}
       <View style={styles.quickDestinations}>
