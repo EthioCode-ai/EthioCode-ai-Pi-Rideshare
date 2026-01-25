@@ -161,15 +161,15 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
       // Choose categories based on time of day
       let categories: string[] = [];
       if (hour >= 6 && hour < 11) {
-        categories = ['coffee shop near me', 'breakfast near me', 'gas station near me'];
+        categories = ['coffee', 'breakfast', 'gas station'];
       } else if (hour >= 11 && hour < 15) {
-        categories = ['lunch near me', 'restaurant near me', 'fast food near me'];
+        categories = ['restaurant', 'lunch', 'fast food'];
       } else if (hour >= 15 && hour < 18) {
-        categories = ['coffee near me', 'shopping near me', 'grocery store near me'];
+        categories = ['coffee', 'shopping mall', 'grocery'];
       } else if (hour >= 18 && hour < 22) {
-        categories = ['dinner near me', 'restaurant near me', 'bar near me'];
+        categories = ['restaurant', 'dinner', 'bar'];
       } else {
-        categories = ['24 hour pharmacy near me', 'gas station near me', 'convenience store near me'];
+        categories = ['pharmacy', 'gas station', 'convenience store'];
       }
       
       const allSuggestions: AISuggestion[] = [];
@@ -196,7 +196,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
                 );
                 
                 // Only include if within 15km (~10 miles)
-                if (distance <= 15) {
+                if (distance <= 20) {
                   allSuggestions.push({
                     name: result.mainText,
                     address: details.address,

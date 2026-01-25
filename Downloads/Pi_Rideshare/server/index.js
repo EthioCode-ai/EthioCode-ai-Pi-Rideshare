@@ -11107,6 +11107,50 @@ app.get('/api/admin/surge/current-status', authenticateToken, async (req, res) =
 // ============================================
 // AI / VOICE ENDPOINTS FOR RIDER APP
 // ============================================
+
+// Text-to-Speech using Google Cloud
+app.post('/api/ai/speak', authenticateToken, async (req, res) => {
+  try {
+    const { text, voice } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    const response = await fetch(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${GOOGLE_MAPS_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: { text },
+          voice: { 
+            languageCode: 'en-US', 
+            name: voice || 'en-US-Neural2-J'  // Default: professional male
+          },
+          audioConfig: { 
+            audioEncoding: 'MP3',
+            speakingRate: 1.0,
+            pitch: 0
+          }
+        })
+      }
+    );
+    
+    const data = await response.json();
+    
+    if (data.audioContent) {
+      res.json({ success: true, audioContent: data.audioContent });
+    } else {
+      console.error('TTS error:', data.error);
+      res.status(400).json({ error: 'Failed to generate speech' });
+    }
+  } catch (error) {
+    console.error('TTS error:', error);
+    res.status(500).json({ error: 'Failed to generate speech' });
+  }
+});
+
 // Speech-to-text using OpenAI Whisper
 app.post('/api/ai/transcribe', authenticateToken, async (req, res) => {
   try {

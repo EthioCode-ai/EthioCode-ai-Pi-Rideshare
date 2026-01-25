@@ -38,6 +38,7 @@ interface SavedPlace {
 }
 
 class VoiceAIService {
+  
   // Text-to-speech
   async speak(text: string): Promise<void> {
     return new Promise((resolve) => {
@@ -48,6 +49,7 @@ class VoiceAIService {
         onDone: () => resolve(),
         onError: () => resolve(),
       });
+      
     });
   }
 

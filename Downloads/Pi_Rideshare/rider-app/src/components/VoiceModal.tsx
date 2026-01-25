@@ -18,6 +18,7 @@ import { aiService } from '../services/ai.service';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 
+
 interface VoiceModalProps {
   visible: boolean;
   onClose: () => void;
@@ -68,7 +69,30 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+// Play Google Cloud TTS audio with fallback to expo-speech
+  const speakWithGoogleTTS = async (text: string) => {
+    try {
+      const result = await aiService.speak(text);
+      
+      if (result.success && result.audioContent) {
+        const { sound } = await Audio.Sound.createAsync(
+          { uri: `data:audio/mp3;base64,${result.audioContent}` }
+        );
+        await sound.playAsync();
+        
+        // Wait for audio to finish
+        const duration = Math.max(2000, text.length * 80);
+        await new Promise(resolve => setTimeout(resolve, duration));
+        await sound.unloadAsync();
+      } else {
+        // Fallback to expo-speech
+        await voiceAIService.speak(text);
+      }
+    } catch (error) {
+      console.error('TTS error, falling back:', error);
+      await voiceAIService.speak(text);
+    }
+  };
   useEffect(() => {
     if (visible) {
       initializeModal();
@@ -282,7 +306,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       if (aiResult.success && aiResult.command) {
         const cmd = aiResult.command;
         setResponse(cmd.response);
-        await voiceAIService.speak(cmd.response);
+        await speakWithGoogleTTS(cmd.response);
 
         // Map AI response to VoiceCommandResult
         if (cmd.type === 'go_to' || cmd.type === 'book_ride') {
@@ -359,7 +383,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
               ? `Current surge is ${p.currentSurge}x. ${p.bestTimeToRide === 'now' ? "It's a good time to ride!" : `Wait ${p.bestTimeToRide} to save $${p.savings}.`}`
               : "No surge right now! It's a great time to ride.";
             setResponse(surgeMsg);
-            await voiceAIService.speak(surgeMsg);
+            await speakWithGoogleTTS(surgeMsg);
           }
           setModalState('responding');
           setTimeout(() => onCloseRef.current(), 3000);
@@ -375,7 +399,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       // Fallback to local processing if AI fails
       const result = await voiceAIService.processCommand(promptText, userLocation);
       setResponse(result.response);
-      await voiceAIService.speak(result.response);
+      await speakWithGoogleTTS(result.response);
 
       if (result.action === 'show_options' && result.options && result.options.length > 0) {
         setPendingResult(result);
@@ -427,7 +451,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     
     if (pendingResult) {
       setResponse("Confirming your ride...");
-      await voiceAIService.speak("Confirming your ride.");
+      await speakWithGoogleTTS("Confirming your ride.");
       navigateToConfirm(pendingResult);
     }
   };
@@ -435,7 +459,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
   const handleCancel = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setResponse("Cancelled.");
-    voiceAIService.speak("Cancelled.");
+    speakWithGoogleTTS("Cancelled.");
     setTimeout(() => onCloseRef.current(), 1000);
   };
 

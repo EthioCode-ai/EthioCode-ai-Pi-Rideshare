@@ -233,6 +233,30 @@ class AIService {
       console.error('Surge prediction error:', error);
       return { success: false, error: 'Network error' };
     }
+  }  /**
+   * Text-to-Speech using Google Cloud Neural voices
+   */
+  async speak(text: string, voice?: string): Promise<{
+    success: boolean;
+    audioContent?: string;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(apiUrl('api/ai/speak'), {
+        method: 'POST',
+        headers: await this.getAuthHeaders(),
+        body: JSON.stringify({ text, voice }),
+      });
+
+      const data = await response.json();
+      if (response.ok && data.success) {
+        return { success: true, audioContent: data.audioContent };
+      }
+      return { success: false, error: data.error || 'Failed to generate speech' };
+    } catch (error) {
+      console.error('TTS error:', error);
+      return { success: false, error: 'Network error' };
+    }
   }
 }
 
