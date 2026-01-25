@@ -15,6 +15,8 @@ import * as Location from 'expo-location';
 import { useTheme } from '../context/ThemeContext';
 import { voiceAIService, VoiceCommandResult } from '../services/voice-ai.service';
 import { aiService } from '../services/ai.service';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 
 interface VoiceModalProps {
   visible: boolean;
@@ -60,6 +62,9 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
   const [airportOptions, setAirportOptions] = useState<VoiceCommandResult['options'] | null>(null);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [learnedPrompts, setLearnedPrompts] = useState<LearnedPrompt[]>(DEFAULT_PROMPTS);
+
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -175,8 +180,94 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     if (onCommandProcessedRef.current) {
       onCommandProcessedRef.current(result);
     }
-  }, []);
+  }, 
+  
+  []);
 
+  const startRecording = async () => {
+    try {
+      // Request permissions
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        setResponse('Microphone permission required');
+        return;
+      }
+
+      // Configure audio mode
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      // Start recording
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      
+      setRecording(recording);
+      setIsRecording(true);
+      setModalState('listening');
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      
+      // Auto-stop after 10 seconds
+      timeoutRef.current = setTimeout(() => {
+        stopRecordingAndProcess();
+      }, 10000);
+      
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      setResponse('Failed to start recording');
+    }
+  };
+
+  const stopRecordingAndProcess = async () => {
+    if (!recording) return;
+    
+    setIsRecording(false);
+    setModalState('processing');
+    
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      setRecording(null);
+      
+      if (!uri) {
+        setResponse('No audio recorded');
+        setModalState('idle');
+        return;
+      }
+
+      // Read audio file as base64
+      const base64Audio = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64',
+      });
+
+      // Transcribe audio
+      const transcribeResult = await aiService.transcribeAudio(base64Audio);
+      
+      if (!transcribeResult.success || !transcribeResult.transcript) {
+        setResponse('Could not understand audio. Please try again.');
+        setModalState('idle');
+        setTimeout(() => onCloseRef.current(), 2000);
+        return;
+      }
+
+      const transcript = transcribeResult.transcript;
+      setTranscript(transcript);
+      
+      // Process the transcribed text
+      await handleStarterPrompt(transcript);
+      
+    } catch (error) {
+      console.error('Error processing recording:', error);
+      setResponse('Error processing audio');
+      setModalState('idle');
+      setTimeout(() => onCloseRef.current(), 2000);
+    }
+  };
+  
   const handleStarterPrompt = async (promptText: string) => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -395,7 +486,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
                   ]}
                 >
                   <Text style={styles.micIcon}>
-                    {modalState === 'processing' ? '⏳' : modalState === 'listening' ? '🎤' : '🎙️'}
+                    {modalState === 'processing' ? '⏳' : isRecording ? '⏹️' : '🎤'}
                   </Text>
                 </Animated.View>
               </TouchableOpacity>

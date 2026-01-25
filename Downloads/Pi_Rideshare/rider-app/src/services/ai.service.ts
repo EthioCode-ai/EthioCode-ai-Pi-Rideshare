@@ -45,6 +45,31 @@ class AIService {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
     };
+     }
+  /**
+   * Transcribe audio to text using OpenAI Whisper
+   */
+  async transcribeAudio(audioBase64: string): Promise<{
+    success: boolean;
+    transcript?: string;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(apiUrl('api/ai/transcribe'), {
+        method: 'POST',
+        headers: await this.getAuthHeaders(),
+        body: JSON.stringify({ audioBase64 }),
+      });
+
+      const data = await response.json();
+      if (response.ok && data.success) {
+        return { success: true, transcript: data.transcript };
+      }
+      return { success: false, error: data.error || 'Failed to transcribe audio' };
+    } catch (error) {
+      console.error('Transcription error:', error);
+      return { success: false, error: 'Network error' };
+    }
   }
 
   /**

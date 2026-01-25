@@ -11107,6 +11107,36 @@ app.get('/api/admin/surge/current-status', authenticateToken, async (req, res) =
 // ============================================
 // AI / VOICE ENDPOINTS FOR RIDER APP
 // ============================================
+// Speech-to-text using OpenAI Whisper
+app.post('/api/ai/transcribe', authenticateToken, async (req, res) => {
+  try {
+    const { audioBase64 } = req.body;
+    
+    if (!audioBase64) {
+      return res.status(400).json({ error: 'Audio data is required' });
+    }
+
+    // Convert base64 to buffer
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    
+    // Create a File-like object for OpenAI
+    const audioFile = new File([audioBuffer], 'audio.m4a', { type: 'audio/m4a' });
+
+    const transcription = await openai.audio.transcriptions.create({
+      file: audioFile,
+      model: 'whisper-1',
+      language: 'en',
+    });
+
+    res.json({ 
+      success: true, 
+      transcript: transcription.text 
+    });
+  } catch (error) {
+    console.error('Transcription error:', error);
+    res.status(500).json({ error: 'Failed to transcribe audio' });
+  }
+});
 
 // Voice command processing - converts speech to structured command
 app.post('/api/ai/process-voice', authenticateToken, async (req, res) => {
