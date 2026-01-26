@@ -5,9 +5,10 @@ import { placesService } from './places.service';
 import { StorageKeys } from '../constants';
 
 export interface VoiceCommandResult {
-  type: 'book_ride' | 'schedule_ride' | 'find_driver' | 'cancel' | 'help' | 'unknown' | 'clarify_airport';
+  type: 'book_ride' | 'schedule_ride' | 'find_driver' | 'cancel' | 'help' | 'unknown' | 'clarify_airport' | 'ride_booked';
+  action?: 'navigate_confirm' | 'navigate_search' | 'navigate_active' | 'show_options' | 'ride_booked' | 'none';
   destination?: {
-    name: string;
+    name?: string;
     address: string;
     latitude: number;
     longitude: number;
@@ -15,7 +16,6 @@ export interface VoiceCommandResult {
   scheduledTime?: Date;
   vehicleType?: string;
   response: string;
-  action: 'navigate_confirm' | 'navigate_search' | 'navigate_active' | 'show_options' | 'none';
   options?: Array<{
     name: string;
     address: string;

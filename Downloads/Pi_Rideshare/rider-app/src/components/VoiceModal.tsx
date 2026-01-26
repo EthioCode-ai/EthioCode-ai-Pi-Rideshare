@@ -15,6 +15,8 @@ import * as Location from 'expo-location';
 import { useTheme } from '../context/ThemeContext';
 import { voiceAIService, VoiceCommandResult } from '../services/voice-ai.service';
 import { aiService } from '../services/ai.service';
+import { rideService } from '../services/ride.service';
+import { StorageKeys } from '../constants';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -31,7 +33,15 @@ interface LearnedPrompt {
   count: number;
 }
 
-type ModalState = 'idle' | 'listening' | 'processing' | 'responding' | 'confirming' | 'selecting';
+type ModalState = 'idle' | 'listening' | 'processing' | 'responding' | 'confirming' | 'selecting' | 'choose_vehicle' | 'choose_preferences' | 'confirm_booking';
+
+interface BookingFlow {
+  destination: { latitude: number; longitude: number; address: string; name?: string } | null;
+  pickup: { latitude: number; longitude: number; address: string } | null;
+  vehicleType: 'economy' | 'standard' | 'xl' | 'premium' | null;
+  preferences: string[];
+  fare: number | null;
+}
 
 const TIMEOUT_MS = 10000;
 const VOICE_HISTORY_KEY = 'voice_command_history';
@@ -66,6 +76,14 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
 
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+
+  const [bookingFlow, setBookingFlow] = useState<BookingFlow>({
+    destination: null,
+    pickup: null,
+    vehicleType: null,
+    preferences: [],
+    fare: null,
+  });
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -165,6 +183,200 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     }
   };
 
+  // Check for saved place by name (home, work, etc.)
+  const getSavedPlace = async (placeName: string): Promise<{ latitude: number; longitude: number; address: string } | null> => {
+    try {
+      const data = await AsyncStorage.getItem(StorageKeys.SAVED_PLACES);
+      if (data) {
+        const places = JSON.parse(data);
+        const place = places.find((p: any) => 
+          p.name.toLowerCase() === placeName.toLowerCase() ||
+          p.name.toLowerCase().includes(placeName.toLowerCase())
+        );
+        if (place) {
+          return { latitude: place.latitude, longitude: place.longitude, address: place.address };
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('Error getting saved place:', error);
+      return null;
+    }
+  };
+
+  // Get fare estimate for the booking
+  const getFareEstimate = async (pickup: any, destination: any, vehicleType: string): Promise<number | null> => {
+    try {
+      const result = await rideService.getEstimate(pickup, destination);
+      if (result.success && result.estimates) {
+        const estimate = result.estimates.find((e: any) => e.vehicleType === vehicleType);
+        return estimate?.totalFare || null;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error getting fare estimate:', error);
+      return null;
+    }
+  };
+
+  // Start the booking flow when destination is identified
+  const startBookingFlow = async (destination: { latitude: number; longitude: number; address: string; name?: string }) => {
+    if (!userLocation) {
+      await speakWithGoogleTTS("I couldn't get your location. Please try again.");
+      return;
+    }
+    
+    // Get current address for pickup
+    const pickupAddress = await Location.reverseGeocodeAsync(userLocation);
+    const pickup = {
+      latitude: userLocation.latitude,
+      longitude: userLocation.longitude,
+      address: pickupAddress[0] ? `${pickupAddress[0].streetNumber || ''} ${pickupAddress[0].street || ''}, ${pickupAddress[0].city || ''}`.trim() : 'Current Location',
+    };
+    
+    setBookingFlow({
+      destination,
+      pickup,
+      vehicleType: null,
+      preferences: [],
+      fare: null,
+    });
+    
+    setModalState('choose_vehicle');
+    setResponse(`Taking you to ${destination.name || destination.address}`);
+    await speakWithGoogleTTS(`Taking you to ${destination.name || destination.address}. Would you prefer an Economy, Standard, XL, or Premium ride?`);
+    setResponse('Choose: Economy, Standard, XL, or Premium');
+    
+    // Start listening for vehicle choice
+    setTimeout(() => startRecording(), 3000);
+  };
+
+  // Handle conversational booking flow
+  const handleBookingConversation = async (userInput: string) => {
+    const input = userInput.toLowerCase();
+    
+    // STATE: Choose Vehicle
+    if (modalState === 'choose_vehicle') {
+      let selectedVehicle: 'economy' | 'standard' | 'xl' | 'premium' | null = null;
+      
+      if (input.includes('economy') || input.includes('cheap') || input.includes('budget')) {
+        selectedVehicle = 'economy';
+      } else if (input.includes('standard') || input.includes('regular') || input.includes('normal')) {
+        selectedVehicle = 'standard';
+      } else if (input.includes('xl') || input.includes('large') || input.includes('big') || input.includes('suv')) {
+        selectedVehicle = 'xl';
+      } else if (input.includes('premium') || input.includes('luxury') || input.includes('business')) {
+        selectedVehicle = 'premium';
+      }
+      
+      if (selectedVehicle) {
+        setBookingFlow(prev => ({ ...prev, vehicleType: selectedVehicle }));
+        setModalState('choose_preferences');
+        setResponse('Select preferences or say "none"');
+        await speakWithGoogleTTS("Any ride preferences? AC On, Quiet Ride, Curbside Pickup, or Pet Friendly Car? Say none if no preferences.");
+        // Start listening again
+        setTimeout(() => startRecording(), 3500);
+      } else {
+        await speakWithGoogleTTS("Sorry, I didn't catch that. Would you prefer Economy, Standard, XL, or Premium?");
+        setTimeout(() => startRecording(), 2500);
+      }
+      return;
+    }
+    
+    // STATE: Choose Preferences
+    if (modalState === 'choose_preferences') {
+      const prefs: string[] = [];
+      
+      if (input.includes('ac') || input.includes('air condition') || input.includes('cool')) {
+        prefs.push('ac_on');
+      }
+      if (input.includes('quiet') || input.includes('silent') || input.includes('no talk')) {
+        prefs.push('quiet_ride');
+      }
+      if (input.includes('curbside') || input.includes('curb')) {
+        prefs.push('curbside');
+      }
+      if (input.includes('pet') || input.includes('dog') || input.includes('cat')) {
+        prefs.push('with_pet');
+      }
+      
+      setBookingFlow(prev => ({ ...prev, preferences: prefs }));
+      
+      // Get fare estimate
+      if (bookingFlow.pickup && bookingFlow.destination && bookingFlow.vehicleType) {
+        setModalState('processing');
+        setResponse('Calculating fare...');
+        
+        const fare = await getFareEstimate(bookingFlow.pickup, bookingFlow.destination, bookingFlow.vehicleType);
+        setBookingFlow(prev => ({ ...prev, fare }));
+        
+        const vehicleName = bookingFlow.vehicleType.charAt(0).toUpperCase() + bookingFlow.vehicleType.slice(1);
+        const fareText = fare ? `$${fare.toFixed(2)}` : 'estimated fare';
+        
+        setModalState('confirm_booking');
+        setResponse(`Confirm ${vehicleName} for ${fareText}?`);
+        await speakWithGoogleTTS(`Confirm your ${vehicleName} ride to ${bookingFlow.destination?.name || bookingFlow.destination?.address} for ${fareText}? Say Yes to book or No to cancel.`);
+        setTimeout(() => startRecording(), 3500);
+      }
+      return;
+    }
+    
+    // STATE: Confirm Booking
+    if (modalState === 'confirm_booking') {
+      if (input.includes('yes') || input.includes('confirm') || input.includes('book') || input.includes('ok')) {
+        setModalState('processing');
+        setResponse('Booking your ride...');
+        
+        try {
+          const result = await rideService.requestRide(
+            bookingFlow.pickup!,
+            bookingFlow.destination!,
+            bookingFlow.vehicleType!,
+            'card',
+            bookingFlow.preferences
+          );
+          
+          if (result.success) {
+            await speakWithGoogleTTS("Your ride has been booked! A driver is on the way.");
+            setResponse('Ride booked successfully!');
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            
+            // Navigate to ride tracking
+            onCommandProcessedRef.current({
+              type: 'ride_booked',
+              action: 'ride_booked',
+              destination: {
+                name: bookingFlow.destination?.name || '',
+                address: bookingFlow.destination!.address,
+                latitude: bookingFlow.destination!.latitude,
+                longitude: bookingFlow.destination!.longitude,
+              },
+              vehicleType: bookingFlow.vehicleType!,
+              response: 'Ride booked successfully!',
+            });
+            
+            setTimeout(() => onCloseRef.current(), 2000);
+          } else {
+            await speakWithGoogleTTS("Sorry, I couldn't book the ride. Please try again.");
+            setResponse('Booking failed. Please try again.');
+            setTimeout(() => onCloseRef.current(), 2000);
+          }
+        } catch (error) {
+          await speakWithGoogleTTS("Sorry, there was an error booking your ride.");
+          setResponse('Error booking ride.');
+          setTimeout(() => onCloseRef.current(), 2000);
+        }
+      } else if (input.includes('no') || input.includes('cancel') || input.includes('stop')) {
+        await speakWithGoogleTTS("Booking cancelled.");
+        setResponse('Booking cancelled.');
+        setTimeout(() => onCloseRef.current(), 1500);
+      } else {
+        await speakWithGoogleTTS("Please say Yes to confirm or No to cancel.");
+        setTimeout(() => startRecording(), 2000);
+      }
+      return;
+    }
+  };
   const saveCommandToHistory = async (commandText: string) => {
     try {
       const data = await AsyncStorage.getItem(VOICE_HISTORY_KEY);
@@ -281,7 +493,13 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       const transcript = transcribeResult.transcript;
       setTranscript(transcript);
       
-      // Process the transcribed text
+      // Check if we're in a booking conversation flow
+      if (modalState === 'choose_vehicle' || modalState === 'choose_preferences' || modalState === 'confirm_booking') {
+        await handleBookingConversation(transcript);
+        return;
+      }
+      
+      // Process the transcribed text (normal flow)
       await handleStarterPrompt(transcript);
       
     } catch (error) {
@@ -300,6 +518,24 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     await saveCommandToHistory(promptText);
 
     try {
+      // Check for saved place keywords first (home, work, etc.)
+      const savedPlaceKeywords = ['home', 'work', 'office', 'gym', 'school'];
+      const lowerPrompt = promptText.toLowerCase();
+      
+      for (const keyword of savedPlaceKeywords) {
+        if (lowerPrompt.includes(keyword)) {
+          const savedPlace = await getSavedPlace(keyword);
+          if (savedPlace) {
+            setResponse(`Found your saved ${keyword} location`);
+            await startBookingFlow({ 
+              ...savedPlace, 
+              name: keyword.charAt(0).toUpperCase() + keyword.slice(1) 
+            });
+            return;
+          }
+        }
+      }
+      
       // Try backend AI first
       const aiResult = await aiService.processVoiceCommand(promptText);
       
