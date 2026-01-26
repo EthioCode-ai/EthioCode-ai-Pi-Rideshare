@@ -19,7 +19,7 @@ import { rideService } from '../services/ride.service';
 import { StorageKeys } from '../constants';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-
+import { apiUrl } from '../config/api.config';
 
 interface VoiceModalProps {
   visible: boolean;
@@ -77,6 +77,9 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
 
+  const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
   const [bookingFlow, setBookingFlow] = useState<BookingFlow>({
     destination: null,
     pickup: null,
@@ -117,8 +120,163 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     } else {
       cleanup();
     }
-    return cleanup;
+    return () => {
+      cleanup();
+    };
   }, [visible]);
+
+// Connect to realtime WebSocket for voice booking
+  const connectRealtimeWs = async () => {
+    try {
+      const token = await AsyncStorage.getItem(StorageKeys.AUTH_TOKEN);
+      if (!token) {
+        console.log('⚠️ No token for realtime connection');
+        return;
+      }
+
+      // Wait for location if not ready
+      let loc = userLocation;
+      if (!loc) {
+        const locResult = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        loc = { latitude: locResult.coords.latitude, longitude: locResult.coords.longitude };
+      }
+
+      // Get current address
+      const addressResult = await Location.reverseGeocodeAsync(loc);
+      const address = addressResult[0] 
+        ? `${addressResult[0].streetNumber || ''} ${addressResult[0].street || ''}, ${addressResult[0].city || ''}`.trim()
+        : 'Current Location';
+
+      // Build WebSocket URL
+      const baseUrl = apiUrl('').replace('https://', 'wss://').replace('http://', 'ws://');
+      const wsUrl = `${baseUrl}ws/realtime?token=${token}&lat=${loc.latitude}&lng=${loc.longitude}&address=${encodeURIComponent(address)}`;
+      
+      console.log('🔗 Connecting to realtime WebSocket...');
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('✅ Realtime WebSocket connected');
+        setWsConnected(true);
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          switch (message.type) {
+            case 'session.ready':
+              console.log('🎙️ Realtime session ready');
+              setResponse('How can I help you?');
+              break;
+
+            case 'response.audio_transcript.delta':
+              if (message.delta) {
+                setResponse(prev => prev + message.delta);
+              }
+              break;
+
+            case 'response.audio_transcript.done':
+              if (message.transcript) {
+                setResponse(message.transcript);
+                await speakWithGoogleTTS(message.transcript);
+              }
+              break;
+
+            case 'response.text.delta':
+              if (message.delta) {
+                setResponse(prev => prev + message.delta);
+              }
+              break;
+
+            case 'response.text.done':
+              if (message.text) {
+                setResponse(message.text);
+                await speakWithGoogleTTS(message.text);
+              }
+              break;
+
+            case 'input_audio_buffer.speech_started':
+              setModalState('listening');
+              setResponse('');
+              break;
+
+            case 'input_audio_buffer.speech_stopped':
+              setModalState('processing');
+              break;
+
+            case 'response.done':
+              setModalState('responding');
+              setTimeout(() => {
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  setModalState('listening');
+                }
+              }, 1000);
+              break;
+
+            case 'tool.result':
+              console.log('🔧 Tool result:', message.tool, message.result);
+              if (message.tool === 'request_ride' && message.result?.success) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                setResponse('Ride booked! Finding your driver...');
+                
+                onCommandProcessedRef.current({
+                  type: 'ride_booked',
+                  action: 'ride_booked',
+                  destination: bookingFlow.destination ? {
+                    name: bookingFlow.destination.name || '',
+                    address: bookingFlow.destination.address,
+                    latitude: bookingFlow.destination.latitude,
+                    longitude: bookingFlow.destination.longitude,
+                  } : undefined,
+                  response: 'Ride booked successfully!',
+                });
+                
+                setTimeout(() => onCloseRef.current(), 2000);
+              }
+              break;
+
+            case 'error':
+              console.error('❌ Realtime error:', message);
+              setResponse('Sorry, there was an error. Please try again.');
+              break;
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('❌ WebSocket error:', error);
+        setWsConnected(false);
+      };
+
+      ws.onclose = () => {
+        console.log('🔌 WebSocket closed');
+        setWsConnected(false);
+        wsRef.current = null;
+      };
+
+    } catch (error) {
+      console.error('Error connecting to realtime WebSocket:', error);
+    }
+  };
+
+  // Send text message via WebSocket
+  const sendTextMessage = (text: string) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text }]
+        }
+      }));
+      wsRef.current.send(JSON.stringify({ type: 'response.create' }));
+      setModalState('processing');
+    }
+  };
 
   const initializeModal = async () => {
     setModalState('listening');
@@ -126,18 +284,42 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     setResponse('');
     setPendingResult(null);
     setAirportOptions(null);
+    setBookingFlow({
+      destination: null,
+      pickup: null,
+      vehicleType: null,
+      preferences: [],
+      fare: null,
+    });
     startPulseAnimation();
-    startTimeout();
+    
     await Promise.all([getUserLocation(), loadLearnedPrompts()]);
+    
+    // Connect to realtime WebSocket
+    connectRealtimeWs();
   };
 
-  const cleanup = () => {
+  const cleanup = async () => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+    if (recording) {
+      try {
+        await recording.stopAndUnloadAsync();
+      } catch (e) {}
+      setRecording(null);
+    }
+    setIsRecording(false);
     voiceAIService.stopSpeaking();
     pulseAnim.setValue(1);
+    
+    // Close WebSocket
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+      setWsConnected(false);
+    }
   };
 
   const startTimeout = () => {
@@ -516,6 +698,12 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     setTranscript(promptText);
     setModalState('processing');
     await saveCommandToHistory(promptText);
+
+    // If WebSocket connected, use realtime API
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      sendTextMessage(promptText);
+      return;
+    }
 
     try {
       // Check for saved place keywords first (home, work, etc.)

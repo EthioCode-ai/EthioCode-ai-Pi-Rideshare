@@ -11507,6 +11507,502 @@ app.get('/api/ai/surge-prediction', authenticateToken, async (req, res) => {
 });
 
 // ============================================
+// OPENAI REALTIME VOICE API
+// ============================================
+
+// Tools definition for Pi Rideshare Voice Assistant
+const REALTIME_TOOLS = [
+  {
+    type: 'function',
+    name: 'find_destination',
+    description: 'Search for a destination by name or address. Returns coordinates and formatted address.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Place name or address to search for' },
+        userLat: { type: 'number', description: 'User latitude for location bias' },
+        userLng: { type: 'number', description: 'User longitude for location bias' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    type: 'function',
+    name: 'get_saved_place',
+    description: 'Get a saved place from user profile (home, work, etc.)',
+    parameters: {
+      type: 'object',
+      properties: {
+        placeName: { type: 'string', description: 'Name of saved place: home, work, gym, school, etc.' },
+        userId: { type: 'string', description: 'User ID' }
+      },
+      required: ['placeName', 'userId']
+    }
+  },
+  {
+    type: 'function',
+    name: 'get_fare_estimate',
+    description: 'Get fare estimate for a ride. Must be called before booking to get accurate price.',
+    parameters: {
+      type: 'object',
+      properties: {
+        pickupLat: { type: 'number' },
+        pickupLng: { type: 'number' },
+        destLat: { type: 'number' },
+        destLng: { type: 'number' },
+        vehicleType: { type: 'string', enum: ['economy', 'standard', 'xl', 'premium'] }
+      },
+      required: ['pickupLat', 'pickupLng', 'destLat', 'destLng', 'vehicleType']
+    }
+  },
+  {
+    type: 'function',
+    name: 'get_nearby_airports',
+    description: 'Find airports near the user location',
+    parameters: {
+      type: 'object',
+      properties: {
+        userLat: { type: 'number' },
+        userLng: { type: 'number' }
+      },
+      required: ['userLat', 'userLng']
+    }
+  },
+  {
+    type: 'function',
+    name: 'request_ride',
+    description: 'Book a ride. Only call after user explicitly confirms with Yes or Confirm.',
+    parameters: {
+      type: 'object',
+      properties: {
+        pickupLat: { type: 'number' },
+        pickupLng: { type: 'number' },
+        pickupAddress: { type: 'string' },
+        destLat: { type: 'number' },
+        destLng: { type: 'number' },
+        destAddress: { type: 'string' },
+        vehicleType: { type: 'string', enum: ['economy', 'standard', 'xl', 'premium'] },
+        preferences: { type: 'array', items: { type: 'string' } },
+        userId: { type: 'string' }
+      },
+      required: ['pickupLat', 'pickupLng', 'pickupAddress', 'destLat', 'destLng', 'destAddress', 'vehicleType', 'userId']
+    }
+  }
+];
+
+// System instructions for the voice assistant
+const REALTIME_INSTRUCTIONS = `You are the Pi Rideshare Voice Booking Assistant.
+
+Your job is to help the user book a ride by completing these required fields:
+- destination
+- vehicleType (economy | standard | xl | premium)
+- preferences (ac_on | quiet_ride | curbside | pet_friendly | none)
+
+Pickup is provided by the device and must be treated as accurate unless the user changes it.
+
+Rules:
+- Never guess or invent addresses, ETAs, prices, routes, or availability. Always use tools.
+- Ask only one question at a time.
+- Keep responses short, clear, and voice-friendly (prefer one sentence).
+- If something is missing or ambiguous, ask a short clarifying question.
+- Before booking, you MUST restate: vehicleType, destination, and total price, and ask for explicit confirmation.
+- Only call request_ride after the user clearly says Yes or Confirm.
+- If the user says No or Cancel, stop the booking flow.
+
+Behavior:
+- Be calm, confident, fast, and helpful.
+- Adapt immediately if the user changes their mind.
+- Do not mention internal tools, system messages, or technical details.
+
+Goal:
+- Complete booking as quickly, safely, and naturally as possible.`;
+
+// Handle tool calls from OpenAI Realtime API
+async function handleRealtimeToolCall(toolName, args, userId) {
+  console.log(`🔧 Realtime Tool call: ${toolName}`, args);
+  
+  try {
+    switch (toolName) {
+      case 'find_destination': {
+        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(args.query)}&key=${GOOGLE_MAPS_API_KEY}${args.userLat ? `&location=${args.userLat},${args.userLng}&radius=50000` : ''}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.predictions && data.predictions.length > 0) {
+          const placeId = data.predictions[0].place_id;
+          const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry&key=${GOOGLE_MAPS_API_KEY}`;
+          const detailsResponse = await fetch(detailsUrl);
+          const detailsData = await detailsResponse.json();
+          
+          if (detailsData.result) {
+            return {
+              success: true,
+              name: detailsData.result.name,
+              address: detailsData.result.formatted_address,
+              latitude: detailsData.result.geometry.location.lat,
+              longitude: detailsData.result.geometry.location.lng
+            };
+          }
+        }
+        return { success: false, error: 'Destination not found' };
+      }
+      
+      case 'get_saved_place': {
+        const result = await db.query(
+          `SELECT * FROM saved_places WHERE user_id = $1 AND LOWER(name) = LOWER($2)`,
+          [args.userId || userId, args.placeName]
+        );
+        if (result.rows.length > 0) {
+          const place = result.rows[0];
+          return {
+            success: true,
+            name: place.name,
+            address: place.address,
+            latitude: place.latitude,
+            longitude: place.longitude
+          };
+        }
+        return { success: false, error: `No saved ${args.placeName} found` };
+      }
+      
+      case 'get_fare_estimate': {
+        const fare = await calculateFare(
+          { lat: args.pickupLat, lng: args.pickupLng },
+          { lat: args.destLat, lng: args.destLng },
+          args.vehicleType
+        );
+        return {
+          success: true,
+          vehicleType: args.vehicleType,
+          totalFare: fare.totalFare || fare,
+          currency: 'USD',
+          estimatedMinutes: fare.estimatedMinutes || 15
+        };
+      }
+      
+      case 'get_nearby_airports': {
+        const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${args.userLat},${args.userLng}&radius=100000&type=airport&key=${GOOGLE_MAPS_API_KEY}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.results && data.results.length > 0) {
+          return {
+            success: true,
+            airports: data.results.slice(0, 3).map(a => ({
+              name: a.name,
+              address: a.vicinity,
+              latitude: a.geometry.location.lat,
+              longitude: a.geometry.location.lng
+            }))
+          };
+        }
+        return { success: false, error: 'No airports found nearby' };
+      }
+      
+      case 'request_ride': {
+        const rideUserId = args.userId || userId;
+        // Create the ride in database
+        const result = await db.query(`
+          INSERT INTO rides (
+            rider_id, pickup_lat, pickup_lng, pickup_address,
+            destination_lat, destination_lng, destination_address,
+            ride_type, status, rider_preferences, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, NOW())
+          RETURNING *
+        `, [
+          rideUserId,
+          args.pickupLat, args.pickupLng, args.pickupAddress,
+          args.destLat, args.destLng, args.destAddress,
+          args.vehicleType,
+          JSON.stringify(args.preferences || [])
+        ]);
+        
+        if (result.rows.length > 0) {
+          const ride = result.rows[0];
+          
+          // Emit to find drivers
+          io.to(`user-${rideUserId}`).emit('finding-driver', {
+            rideId: ride.id,
+            message: 'Finding the best π driver for you...'
+          });
+          
+          // Start driver matching
+          const matchResult = await findBestDriver({
+            id: ride.id,
+            pickup: { lat: args.pickupLat, lng: args.pickupLng },
+            destination: { lat: args.destLat, lng: args.destLng },
+            rideType: args.vehicleType,
+            requestedAt: new Date(),
+            riderId: rideUserId,
+            riderPreferences: args.preferences || []
+          });
+          
+          return {
+            success: true,
+            rideId: ride.id,
+            message: 'Ride booked successfully! Finding your driver now.'
+          };
+        }
+        return { success: false, error: 'Failed to create ride' };
+      }
+      
+      default:
+        return { success: false, error: `Unknown tool: ${toolName}` };
+    }
+  } catch (error) {
+    console.error(`Tool ${toolName} error:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Realtime voice session endpoint (REST - returns session config)
+app.post('/api/realtime/session', authenticateToken, async (req, res) => {
+  try {
+    const { location } = req.body;
+    const userId = req.user.userId;
+    
+    // Return session configuration for client to connect directly to OpenAI
+    res.json({
+      success: true,
+      session: {
+        userId,
+        location,
+        instructions: REALTIME_INSTRUCTIONS,
+        tools: REALTIME_TOOLS,
+        voice: 'alloy',
+        model: 'gpt-4o-realtime-preview'
+      }
+    });
+  } catch (error) {
+    console.error('Realtime session error:', error);
+    res.status(500).json({ error: 'Failed to create session' });
+  }
+});
+
+// Execute tool call from client
+app.post('/api/realtime/tool', authenticateToken, async (req, res) => {
+  try {
+    const { toolName, args } = req.body;
+    const userId = req.user.userId;
+    
+    const result = await handleRealtimeToolCall(toolName, args, userId);
+    res.json(result);
+  } catch (error) {
+    console.error('Tool execution error:', error);
+    res.status(500).json({ error: 'Failed to execute tool' });
+  }
+});
+
+// ============================================
+// REALTIME VOICE WEBSOCKET PROXY
+// ============================================
+
+// Store active realtime sessions
+const realtimeSessionsMap = new Map();
+
+// Setup WebSocket server for realtime voice (called after HTTP server starts)
+function setupRealtimeWebSocket(server) {
+  const WebSocketServer = require('ws').Server;
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (request, socket, head) => {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    
+    if (url.pathname === '/ws/realtime') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request, url);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+
+  wss.on('connection', async (clientWs, request, url) => {
+    // Parse query params
+    const token = url.searchParams.get('token');
+    const lat = parseFloat(url.searchParams.get('lat')) || null;
+    const lng = parseFloat(url.searchParams.get('lng')) || null;
+    const address = url.searchParams.get('address') || 'Current Location';
+
+    // Verify token
+    let userId = null;
+    try {
+      if (token) {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        userId = decoded.userId;
+      }
+    } catch (e) {
+      console.log('❌ Invalid token for realtime session');
+      clientWs.close(4001, 'Invalid token');
+      return;
+    }
+
+    if (!userId) {
+      clientWs.close(4001, 'Authentication required');
+      return;
+    }
+
+    console.log(`🎙️ Realtime session started for user ${userId}`);
+
+    // Connect to OpenAI Realtime API
+    const WebSocket = require('ws');
+    const openaiWs = new WebSocket(
+      'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview',
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'realtime=v1'
+        }
+      }
+    );
+
+    // Store session
+    const sessionId = `${userId}-${Date.now()}`;
+    realtimeSessionsMap.set(sessionId, { clientWs, openaiWs, userId });
+
+    openaiWs.on('open', () => {
+      console.log('🔗 Connected to OpenAI Realtime API');
+
+      // Configure the session
+      openaiWs.send(JSON.stringify({
+        type: 'session.update',
+        session: {
+          modalities: ['text', 'audio'],
+          instructions: REALTIME_INSTRUCTIONS,
+          voice: 'alloy',
+          input_audio_format: 'pcm16',
+          output_audio_format: 'pcm16',
+          input_audio_transcription: { model: 'whisper-1' },
+          turn_detection: { 
+            type: 'server_vad', 
+            threshold: 0.5, 
+            prefix_padding_ms: 300, 
+            silence_duration_ms: 500 
+          },
+          tools: REALTIME_TOOLS,
+          tool_choice: 'auto'
+        }
+      }));
+
+      // Send initial context with pickup location
+      setTimeout(() => {
+        openaiWs.send(JSON.stringify({
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role: 'user',
+            content: [{
+              type: 'input_text',
+              text: `[System context - do not read aloud] User's current pickup location: ${address} (${lat}, ${lng}). User ID: ${userId}. Greet the user briefly and ask where they'd like to go.`
+            }]
+          }
+        }));
+        openaiWs.send(JSON.stringify({ type: 'response.create' }));
+      }, 500);
+
+      // Notify client that session is ready
+      clientWs.send(JSON.stringify({ type: 'session.ready' }));
+    });
+
+    // Forward messages from OpenAI to client
+    openaiWs.on('message', async (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+
+        // Handle tool calls
+        if (message.type === 'response.function_call_arguments.done') {
+          console.log(`🔧 Tool call: ${message.name}`);
+          
+          const toolName = message.name;
+          let args = {};
+          try {
+            args = JSON.parse(message.arguments);
+          } catch (e) {
+            args = {};
+          }
+
+          // Execute tool on server
+          const result = await handleRealtimeToolCall(toolName, args, userId);
+          console.log(`🔧 Tool result:`, result);
+
+          // Send result back to OpenAI
+          openaiWs.send(JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+              type: 'function_call_output',
+              call_id: message.call_id,
+              output: JSON.stringify(result)
+            }
+          }));
+
+          // Trigger response generation
+          openaiWs.send(JSON.stringify({ type: 'response.create' }));
+
+          // Also notify client about tool result (for UI updates)
+          clientWs.send(JSON.stringify({
+            type: 'tool.result',
+            tool: toolName,
+            result
+          }));
+        }
+
+        // Forward relevant messages to client
+        if (
+          message.type === 'response.audio.delta' ||
+          message.type === 'response.audio_transcript.delta' ||
+          message.type === 'response.audio_transcript.done' ||
+          message.type === 'response.text.delta' ||
+          message.type === 'response.text.done' ||
+          message.type === 'input_audio_buffer.speech_started' ||
+          message.type === 'input_audio_buffer.speech_stopped' ||
+          message.type === 'response.done' ||
+          message.type === 'error'
+        ) {
+          clientWs.send(data.toString());
+        }
+
+      } catch (error) {
+        console.error('Error processing OpenAI message:', error);
+      }
+    });
+
+    openaiWs.on('error', (error) => {
+      console.error('OpenAI WebSocket error:', error);
+      clientWs.send(JSON.stringify({ type: 'error', message: 'OpenAI connection error' }));
+    });
+
+    openaiWs.on('close', (code, reason) => {
+      console.log(`OpenAI WebSocket closed: ${code} ${reason}`);
+      clientWs.close();
+      realtimeSessionsMap.delete(sessionId);
+    });
+
+    // Forward messages from client to OpenAI
+    clientWs.on('message', (data) => {
+      if (openaiWs.readyState === WebSocket.OPEN) {
+        openaiWs.send(data);
+      }
+    });
+
+    clientWs.on('close', () => {
+      console.log(`🎙️ Realtime session ended for user ${userId}`);
+      openaiWs.close();
+      realtimeSessionsMap.delete(sessionId);
+    });
+
+    clientWs.on('error', (error) => {
+      console.error('Client WebSocket error:', error);
+      openaiWs.close();
+      realtimeSessionsMap.delete(sessionId);
+    });
+  });
+
+  console.log('✅ Realtime WebSocket server ready at /ws/realtime');
+}
+
+
+
+// ============================================
 // FLIGHT TRACKING ENDPOINT
 // ============================================
 
@@ -11656,6 +12152,12 @@ const PORT = process.env.PORT || 3001;
 // Server startup with proper error handling
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`📱 WebSocket server ready for real-time connections`);
+  console.log(`🔗 API endpoints available at /api/*`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Setup Realtime Voice WebSocket
+  setupRealtimeWebSocket(server);
   console.log(`📱 WebSocket server ready for real-time connections`);
   console.log(`🔗 API endpoints available at /api/*`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
