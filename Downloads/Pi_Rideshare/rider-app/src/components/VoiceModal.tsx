@@ -76,6 +76,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
 
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const isPreparingRef = useRef(false);  // Mutex to prevent double recording
 
   const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -167,7 +168,8 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
           switch (message.type) {
             case 'session.ready':
               console.log('🎙️ Realtime session ready');
-              setResponse('How can I help you?');
+              // Start recording ONLY here (single source)
+              startRecording();
               break;
 
             case 'response.audio_transcript.delta':
@@ -303,13 +305,8 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     
     await Promise.all([getUserLocation(), loadLearnedPrompts()]);
     
-    // Connect to realtime WebSocket
+    // Connect to realtime WebSocket - recording will start on session.ready
     connectRealtimeWs();
-    
-    // Auto-start recording after a brief delay
-    setTimeout(() => {
-      startRecording();
-    }, 500);
   };
 
   const cleanup = async () => {
@@ -324,6 +321,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       setRecording(null);
     }
     setIsRecording(false);
+    isPreparingRef.current = false;  // Reset mutex
     voiceAIService.stopSpeaking();
     pulseAnim.setValue(1);
     
@@ -616,21 +614,29 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
   []);
 
   const startRecording = async () => {
+    // Mutex guard - prevent double recording
+    if (isPreparingRef.current || isRecording) {
+      console.log('⚠️ Recording already in progress, skipping');
+      return;
+    }
+    isPreparingRef.current = true;
+
     try {
       // Clean up any existing recording first
       if (recording) {
         try {
           await recording.stopAndUnloadAsync();
         } catch (e) {
-          // Ignore cleanup errors
+          // Ignore cleanup errors - recording may already be stopped
         }
         setRecording(null);
       }
-      
+
       // Request permissions
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
         setResponse('Microphone permission required');
+        isPreparingRef.current = false;
         return;
       }
 
@@ -638,15 +644,18 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
       });
 
-      // Start recording
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      setRecording(newRecording);
+      // Create and start recording
+      const rec = new Audio.Recording();
+      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await rec.startAsync();
+      
+      setRecording(rec);
       setIsRecording(true);
       setModalState('listening');
+      console.log('🎙️ Recording started');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -655,15 +664,20 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       timeoutRef.current = setTimeout(() => {
         stopRecordingAndProcess();
       }, 10000);
+      
     } catch (error) {
       console.error('Failed to start recording:', error);
       setResponse('Tap mic to try again');
       setIsRecording(false);
+      isPreparingRef.current = false;
     }
   };
 
   const stopRecordingAndProcess = async () => {
-    if (!recording) return;
+    if (!recording) {
+      isPreparingRef.current = false;
+      return;
+    }
     
     setIsRecording(false);
     setModalState('processing');
@@ -710,6 +724,7 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       console.error('Error processing recording:', error);
       setResponse('Error processing audio');
       setModalState('idle');
+      isPreparingRef.current = false;
       setTimeout(() => onCloseRef.current(), 2000);
     }
   };
