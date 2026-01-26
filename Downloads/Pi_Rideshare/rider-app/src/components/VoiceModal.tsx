@@ -238,7 +238,13 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
 
             case 'error':
               console.error('❌ Realtime error:', message);
-              setResponse('Sorry, there was an error. Please try again.');
+              // Close WebSocket and fall back to regular mode
+              if (wsRef.current) {
+                wsRef.current.close();
+                wsRef.current = null;
+                setWsConnected(false);
+              }
+              setResponse('Voice assistant ready. Tap mic to speak.');
               break;
           }
         } catch (error) {
@@ -249,6 +255,8 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       ws.onerror = (error) => {
         console.error('❌ WebSocket error:', error);
         setWsConnected(false);
+        wsRef.current = null;
+        // Fallback silently - old system will be used
       };
 
       ws.onclose = () => {
@@ -297,6 +305,11 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
     
     // Connect to realtime WebSocket
     connectRealtimeWs();
+    
+    // Auto-start recording after a brief delay
+    setTimeout(() => {
+      startRecording();
+    }, 500);
   };
 
   const cleanup = async () => {

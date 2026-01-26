@@ -16,7 +16,7 @@ export interface VoiceCommandResult {
   scheduledTime?: Date;
   vehicleType?: string;
   response: string;
-  options?: Array<{
+    options?: Array<{
     name: string;
     address: string;
     latitude: number;

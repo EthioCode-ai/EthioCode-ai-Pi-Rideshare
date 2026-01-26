@@ -11794,13 +11794,13 @@ app.post('/api/realtime/tool', authenticateToken, async (req, res) => {
 });
 
 // ============================================
-// REALTIME VOICE WEBSOCKET PROXY
+// REALTIME VOICE WEBSOCKET PROXY (with retry + fallback)
 // ============================================
 
 // Store active realtime sessions
 const realtimeSessionsMap = new Map();
 
-// Setup WebSocket server for realtime voice (called after HTTP server starts)
+// Setup WebSocket server for realtime voice
 function setupRealtimeWebSocket(server) {
   const WebSocketServer = require('ws').Server;
   const wss = new WebSocketServer({ noServer: true });
@@ -11818,11 +11818,8 @@ function setupRealtimeWebSocket(server) {
   });
 
   wss.on('connection', async (clientWs, request, url) => {
-    // Parse query params
+    // Only get token from URL - location comes via message
     const token = url.searchParams.get('token');
-    const lat = parseFloat(url.searchParams.get('lat')) || null;
-    const lng = parseFloat(url.searchParams.get('lng')) || null;
-    const address = url.searchParams.get('address') || 'Current Location';
 
     // Verify token
     let userId = null;
@@ -11844,142 +11841,232 @@ function setupRealtimeWebSocket(server) {
 
     console.log(`🎙️ Realtime session started for user ${userId}`);
 
-    // Connect to OpenAI Realtime API
-    const WebSocket = require('ws');
-    const openaiWs = new WebSocket(
-      'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview',
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'realtime=v1'
-        }
-      }
-    );
-
-    // Store session
+    // Session state
+    let openaiWs = null;
+    let userLocation = null;
+    let retryCount = 0;
+    const maxRetries = 3;
     const sessionId = `${userId}-${Date.now()}`;
-    realtimeSessionsMap.set(sessionId, { clientWs, openaiWs, userId });
+    
+    // Store session
+    realtimeSessionsMap.set(sessionId, { clientWs, userId });
 
-    openaiWs.on('open', () => {
-      console.log('🔗 Connected to OpenAI Realtime API');
-
-     // Configure the session - text only mode (we transcribe locally)
-      openaiWs.send(JSON.stringify({
-        type: 'session.update',
-        session: {
-          modalities: ['text'],
-          instructions: REALTIME_INSTRUCTIONS,
-          tools: REALTIME_TOOLS,
-          tool_choice: 'auto'
-        }
-      }));
-
-     // Send initial greeting request
+    // Connect to OpenAI with retry logic
+    const connectToOpenAI = () => {
+      const WebSocket = require('ws');
+      
+      // Calculate backoff with jitter
+      const baseDelay = Math.min(500 * Math.pow(2, retryCount), 8000);
+      const jitter = baseDelay * 0.2 * (Math.random() - 0.5);
+      const delay = retryCount === 0 ? 0 : baseDelay + jitter;
+      
       setTimeout(() => {
-        openaiWs.send(JSON.stringify({
-          type: 'response.create',
-          response: {
-            modalities: ['text'],
-            instructions: `The user's pickup location is: ${address} (coordinates: ${lat}, ${lng}). User ID is ${userId}. Greet the user briefly and ask where they would like to go.`
+        console.log(`🔗 Connecting to OpenAI Realtime API (attempt ${retryCount + 1}/${maxRetries})...`);
+        
+        openaiWs = new WebSocket(
+          'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview',
+          {
+            headers: {
+              'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+              'OpenAI-Beta': 'realtime=v1'
+            }
           }
-        }));
-      }, 500);
+        );
 
-      // Notify client that session is ready
-      clientWs.send(JSON.stringify({ type: 'session.ready' }));
-    });
-
-    // Forward messages from OpenAI to client
-    openaiWs.on('message', async (data) => {
-      try {
-        const message = JSON.parse(data.toString());
-
-        // Handle tool calls
-        if (message.type === 'response.function_call_arguments.done') {
-          console.log(`🔧 Tool call: ${message.name}`);
+        openaiWs.on('open', () => {
+          console.log('✅ Connected to OpenAI Realtime API');
+          retryCount = 0; // Reset on successful connection
           
-          const toolName = message.name;
-          let args = {};
-          try {
-            args = JSON.parse(message.arguments);
-          } catch (e) {
-            args = {};
-          }
-
-          // Execute tool on server
-          const result = await handleRealtimeToolCall(toolName, args, userId);
-          console.log(`🔧 Tool result:`, result);
-
-          // Send result back to OpenAI
+          // Configure session in initial message (avoid session.update)
           openaiWs.send(JSON.stringify({
-            type: 'conversation.item.create',
-            item: {
-              type: 'function_call_output',
-              call_id: message.call_id,
-              output: JSON.stringify(result)
+            type: 'session.update',
+            session: {
+              modalities: ['text'],
+              instructions: REALTIME_INSTRUCTIONS,
+              tools: REALTIME_TOOLS,
+              tool_choice: 'auto'
             }
           }));
+          
+          // Notify client - ready to receive location
+          clientWs.send(JSON.stringify({ type: 'session.ready' }));
+        });
 
-          // Trigger response generation
-          openaiWs.send(JSON.stringify({ type: 'response.create' }));
+        openaiWs.on('message', async (data) => {
+          try {
+            const message = JSON.parse(data.toString());
+            
+            // Log for debugging
+            if (message.type === 'error') {
+              console.error(`❌ OpenAI error [${sessionId}]:`, JSON.stringify(message.error));
+            }
 
-          // Also notify client about tool result (for UI updates)
-          clientWs.send(JSON.stringify({
-            type: 'tool.result',
-            tool: toolName,
-            result
-          }));
-        }
+            // Handle session.updated confirmation
+            if (message.type === 'session.updated') {
+              console.log('✅ OpenAI session configured');
+            }
 
-        // Forward relevant messages to client
-        if (
-          message.type === 'response.audio.delta' ||
-          message.type === 'response.audio_transcript.delta' ||
-          message.type === 'response.audio_transcript.done' ||
-          message.type === 'response.text.delta' ||
-          message.type === 'response.text.done' ||
-          message.type === 'input_audio_buffer.speech_started' ||
-          message.type === 'input_audio_buffer.speech_stopped' ||
-          message.type === 'response.done' ||
-          message.type === 'error'
-        ) {
-          clientWs.send(data.toString());
-        }
+            // Handle tool calls
+            if (message.type === 'response.function_call_arguments.done') {
+              console.log(`🔧 Tool call: ${message.name}`);
+              
+              const toolName = message.name;
+              let args = {};
+              try {
+                args = JSON.parse(message.arguments);
+              } catch (e) {
+                args = {};
+              }
 
-      } catch (error) {
-        console.error('Error processing OpenAI message:', error);
-      }
-    });
+              // Execute tool on server
+              const result = await handleRealtimeToolCall(toolName, args, userId);
+              console.log(`🔧 Tool result:`, result);
 
-    openaiWs.on('error', (error) => {
-      console.error('OpenAI WebSocket error:', error);
-      clientWs.send(JSON.stringify({ type: 'error', message: 'OpenAI connection error' }));
-    });
+              // Send result back to OpenAI
+              openaiWs.send(JSON.stringify({
+                type: 'conversation.item.create',
+                item: {
+                  type: 'function_call_output',
+                  call_id: message.call_id,
+                  output: JSON.stringify(result)
+                }
+              }));
 
-    openaiWs.on('close', (code, reason) => {
-      console.log(`OpenAI WebSocket closed: ${code} ${reason}`);
-      clientWs.close();
-      realtimeSessionsMap.delete(sessionId);
-    });
+              // Trigger response generation
+              openaiWs.send(JSON.stringify({ type: 'response.create' }));
 
-    // Forward messages from client to OpenAI
+              // Notify client about tool result
+              clientWs.send(JSON.stringify({
+                type: 'tool.result',
+                tool: toolName,
+                result
+              }));
+            }
+
+            // Handle server errors with retry
+            if (message.type === 'error' && message.error?.type === 'server_error') {
+              console.log(`⚠️ Server error, will retry... [session: ${sessionId}]`);
+              
+              if (retryCount < maxRetries) {
+                retryCount++;
+                openaiWs.close();
+                connectToOpenAI();
+              } else {
+                console.log('❌ Max retries reached, switching to fallback mode');
+                clientWs.send(JSON.stringify({ 
+                  type: 'fallback_mode',
+                  message: 'Voice assistant temporarily unavailable. Please use text input.'
+                }));
+              }
+              return;
+            }
+
+            // Forward relevant messages to client
+            if (
+              message.type === 'response.audio.delta' ||
+              message.type === 'response.audio_transcript.delta' ||
+              message.type === 'response.audio_transcript.done' ||
+              message.type === 'response.text.delta' ||
+              message.type === 'response.text.done' ||
+              message.type === 'input_audio_buffer.speech_started' ||
+              message.type === 'input_audio_buffer.speech_stopped' ||
+              message.type === 'response.done' ||
+              message.type === 'session.updated'
+            ) {
+              clientWs.send(data.toString());
+            }
+
+          } catch (error) {
+            console.error('Error processing OpenAI message:', error);
+          }
+        });
+
+        openaiWs.on('error', (error) => {
+          console.error('OpenAI WebSocket error:', error.message);
+        });
+
+        openaiWs.on('close', (code, reason) => {
+          console.log(`OpenAI WebSocket closed: ${code} ${reason || ''}`);
+          
+          // If unexpected close and we haven't hit max retries, reconnect
+          if (code !== 1000 && retryCount < maxRetries && clientWs.readyState === WebSocket.OPEN) {
+            retryCount++;
+            console.log(`⚠️ Unexpected close, retrying...`);
+            connectToOpenAI();
+          }
+        });
+      }, delay);
+    };
+
+    // Handle messages from client
     clientWs.on('message', (data) => {
-      if (openaiWs.readyState === WebSocket.OPEN) {
-        openaiWs.send(data);
+      try {
+        const message = JSON.parse(data.toString());
+        
+        // Handle location update (sent as first message from client)
+        if (message.type === 'location.update') {
+          userLocation = message.location;
+          console.log(`📍 User location received: ${userLocation.address}`);
+          
+          // Update session context with location
+          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.send(JSON.stringify({
+              type: 'conversation.item.create',
+              item: {
+                type: 'message',
+                role: 'system',
+                content: [{
+                  type: 'input_text',
+                  text: `[Context] User's pickup location: ${userLocation.address} (${userLocation.lat}, ${userLocation.lng}). User ID: ${userId}.`
+                }]
+              }
+            }));
+          }
+          return;
+        }
+        
+        // Handle user text input
+        if (message.type === 'conversation.item.create') {
+          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.send(data.toString());
+          }
+          return;
+        }
+        
+        // Handle response.create
+        if (message.type === 'response.create') {
+          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.send(data.toString());
+          }
+          return;
+        }
+        
+        // Forward other messages to OpenAI
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+          openaiWs.send(data.toString());
+        }
+      } catch (e) {
+        // Binary data (audio) - forward directly
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+          openaiWs.send(data);
+        }
       }
     });
 
     clientWs.on('close', () => {
       console.log(`🎙️ Realtime session ended for user ${userId}`);
-      openaiWs.close();
+      if (openaiWs) openaiWs.close();
       realtimeSessionsMap.delete(sessionId);
     });
 
     clientWs.on('error', (error) => {
       console.error('Client WebSocket error:', error);
-      openaiWs.close();
+      if (openaiWs) openaiWs.close();
       realtimeSessionsMap.delete(sessionId);
     });
+
+    // Start connection to OpenAI
+    connectToOpenAI();
   });
 
   console.log('✅ Realtime WebSocket server ready at /ws/realtime');
