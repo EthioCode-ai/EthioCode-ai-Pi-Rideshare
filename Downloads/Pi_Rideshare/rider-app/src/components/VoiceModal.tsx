@@ -16,7 +16,7 @@ import { useTheme } from '../context/ThemeContext';
 import { voiceAIService, VoiceCommandResult } from '../services/voice-ai.service';
 import { aiService } from '../services/ai.service';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 
 interface VoiceModalProps {
