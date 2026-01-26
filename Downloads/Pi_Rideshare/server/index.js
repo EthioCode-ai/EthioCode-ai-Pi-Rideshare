@@ -11863,22 +11863,12 @@ function setupRealtimeWebSocket(server) {
     openaiWs.on('open', () => {
       console.log('🔗 Connected to OpenAI Realtime API');
 
-      // Configure the session
+     // Configure the session - text only mode (we transcribe locally)
       openaiWs.send(JSON.stringify({
         type: 'session.update',
         session: {
-          modalities: ['text', 'audio'],
+          modalities: ['text'],
           instructions: REALTIME_INSTRUCTIONS,
-          voice: 'alloy',
-          input_audio_format: 'pcm16',
-          output_audio_format: 'pcm16',
-          input_audio_transcription: { model: 'whisper-1' },
-          turn_detection: { 
-            type: 'server_vad', 
-            threshold: 0.5, 
-            prefix_padding_ms: 300, 
-            silence_duration_ms: 500 
-          },
           tools: REALTIME_TOOLS,
           tool_choice: 'auto'
         }
@@ -11889,7 +11879,7 @@ function setupRealtimeWebSocket(server) {
         openaiWs.send(JSON.stringify({
           type: 'response.create',
           response: {
-            modalities: ['text', 'audio'],
+            modalities: ['text'],
             instructions: `The user's pickup location is: ${address} (coordinates: ${lat}, ${lng}). User ID is ${userId}. Greet the user briefly and ask where they would like to go.`
           }
         }));
