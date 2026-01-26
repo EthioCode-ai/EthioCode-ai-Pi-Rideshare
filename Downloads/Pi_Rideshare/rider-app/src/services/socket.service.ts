@@ -50,8 +50,12 @@ class SocketService {
     console.log('🔍 Rider name set to:', this.riderFirstName);
 
     this.socket = io(getSocketUrl(), {
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
       autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 20000,
     });
 
     this.socket.on('connect', () => {
