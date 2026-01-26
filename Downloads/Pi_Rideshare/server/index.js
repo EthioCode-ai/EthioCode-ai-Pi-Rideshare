@@ -11884,20 +11884,15 @@ function setupRealtimeWebSocket(server) {
         }
       }));
 
-      // Send initial context with pickup location
+     // Send initial greeting request
       setTimeout(() => {
         openaiWs.send(JSON.stringify({
-          type: 'conversation.item.create',
-          item: {
-            type: 'message',
-            role: 'user',
-            content: [{
-              type: 'input_text',
-              text: `[System context - do not read aloud] User's current pickup location: ${address} (${lat}, ${lng}). User ID: ${userId}. Greet the user briefly and ask where they'd like to go.`
-            }]
+          type: 'response.create',
+          response: {
+            modalities: ['text', 'audio'],
+            instructions: `The user's pickup location is: ${address} (coordinates: ${lat}, ${lng}). User ID is ${userId}. Greet the user briefly and ask where they would like to go.`
           }
         }));
-        openaiWs.send(JSON.stringify({ type: 'response.create' }));
       }, 500);
 
       // Notify client that session is ready
