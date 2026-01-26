@@ -84,6 +84,7 @@ const RideConfirmScreen = () => {
   useEffect(() => {
     fetchEstimates();
     fetchVehicleTypes();
+    fetchRoute();
   }, []);
 
   const fetchVehicleTypes = async () => {

@@ -78,6 +78,11 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
   const [isRecording, setIsRecording] = useState(false);
   const isPreparingRef = useRef(false);  // Mutex to prevent double recording
 
+    // Button visibility states
+  const [showVehicleButtons, setShowVehicleButtons] = useState(false);
+  const [showPreferenceButtons, setShowPreferenceButtons] = useState(false);
+  const [showConfirmButtons, setShowConfirmButtons] = useState(false);
+
   const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -195,6 +200,30 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
               if (message.text) {
                 setResponse(message.text);
                 await speakWithGoogleTTS(message.text);
+                
+                // Detect what buttons to show based on AI response
+                const lowerText = message.text.toLowerCase();
+                if (lowerText.includes('economy') && lowerText.includes('standard') && lowerText.includes('premium')) {
+                  setShowVehicleButtons(true);
+                  setShowPreferenceButtons(false);
+                  setShowConfirmButtons(false);
+                } else if (lowerText.includes('preference') || (lowerText.includes('ac') && lowerText.includes('quiet'))) {
+                  setShowVehicleButtons(false);
+                  setShowPreferenceButtons(true);
+                  setShowConfirmButtons(false);
+                } else if (lowerText.includes('confirm') || (lowerText.includes('book') && lowerText.includes('$'))) {
+                  setShowVehicleButtons(false);
+                  setShowPreferenceButtons(false);
+                  setShowConfirmButtons(true);
+                } else {
+                  // No buttons needed, continue listening
+                  setTimeout(() => {
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                      setModalState('listening');
+                      startRecording();
+                    }
+                  }, 500);
+                }
               }
               break;
 
@@ -286,6 +315,25 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       wsRef.current.send(JSON.stringify({ type: 'response.create' }));
       setModalState('processing');
     }
+  };
+
+// Handle vehicle type selection via button
+  const handleVehicleButton = (vehicleType: string) => {
+    setShowVehicleButtons(false);
+    sendTextMessage(vehicleType);
+  };
+
+  // Handle preference selection via button
+  const handlePreferencesDone = (prefs: string[]) => {
+    setShowPreferenceButtons(false);
+    const prefText = prefs.length > 0 ? prefs.join(' and ') : 'none';
+    sendTextMessage(prefText);
+  };
+
+  // Handle confirm/cancel via button
+  const handleConfirmButton = (confirmed: boolean) => {
+    setShowConfirmButtons(false);
+    sendTextMessage(confirmed ? 'Yes, confirm' : 'No, cancel');
   };
 
   const initializeModal = async () => {
@@ -1032,6 +1080,93 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
                   onPress={handleConfirm}
                 >
                   <Text style={{ fontSize: 14, fontWeight: '600', color: isDark ? '#0d0d1a' : '#ffffff' }}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+{/* Vehicle Type Buttons */}
+            {showVehicleButtons && (
+              <View style={{ padding: 16, gap: 8 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center', marginBottom: 8, textTransform: 'uppercase' }}>
+                  Select Vehicle Type
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>
+                  {[
+                    { id: 'economy', label: '🚗 Economy', color: '#22c55e' },
+                    { id: 'standard', label: '🚙 Standard', color: '#3b82f6' },
+                    { id: 'xl', label: '🚐 XL', color: '#8b5cf6' },
+                    { id: 'premium', label: '✨ Premium', color: '#f59e0b' },
+                  ].map((v) => (
+                    <TouchableOpacity
+                      key={v.id}
+                      style={{
+                        backgroundColor: v.color,
+                        paddingHorizontal: 16,
+                        paddingVertical: 14,
+                        borderRadius: 12,
+                        minWidth: 90,
+                        alignItems: 'center',
+                      }}
+                      onPress={() => handleVehicleButton(v.id)}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 14 }}>{v.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Preference Buttons */}
+            {showPreferenceButtons && (
+              <View style={{ padding: 16, gap: 12 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center', marginBottom: 8, textTransform: 'uppercase' }}>
+                  Select Preferences (optional)
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>
+                  {[
+                    { id: 'ac_on', label: '🌡️ AC On' },
+                    { id: 'quiet_ride', label: '🔇 Quiet Ride' },
+                    { id: 'curbside', label: '🚪 Curbside' },
+                    { id: 'with_pet', label: '🐕 With Pet' },
+                  ].map((p) => (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={{
+                        backgroundColor: bookingFlow.preferences.includes(p.id) ? '#3b82f6' : colors.inputBackground,
+                        paddingHorizontal: 14,
+                        paddingVertical: 12,
+                        borderRadius: 20,
+                        borderWidth: 1,
+                        borderColor: bookingFlow.preferences.includes(p.id) ? '#3b82f6' : colors.cardBorder,
+                      }}
+                      onPress={() => {
+                        setBookingFlow(prev => ({
+                          ...prev,
+                          preferences: prev.preferences.includes(p.id)
+                            ? prev.preferences.filter(x => x !== p.id)
+                            : [...prev.preferences, p.id]
+                        }));
+                      }}
+                    >
+                      <Text style={{ color: bookingFlow.preferences.includes(p.id) ? '#FFFFFF' : colors.text, fontWeight: '500' }}>
+                        {p.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#22c55e',
+                    paddingVertical: 14,
+                    borderRadius: 25,
+                    alignItems: 'center',
+                    marginTop: 8,
+                  }}
+                  onPress={() => handlePreferencesDone(bookingFlow.preferences)}
+                >
+                  <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 16 }}>
+                    {bookingFlow.preferences.length > 0 ? `Continue (${bookingFlow.preferences.length} selected)` : 'No Preferences - Continue'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
