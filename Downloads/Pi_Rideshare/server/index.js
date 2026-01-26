@@ -2691,7 +2691,8 @@ app.post('/api/rides/request', rideLimiter, authenticateToken, async (req, res) 
         destination: destination.coordinates,
         rideType: rideType || 'standard',
         requestedAt: new Date(),
-        riderId: req.user.userId
+        riderId: req.user.userId,
+        riderPreferences: riderPreferences || []
       });
 
       if (matchResult && matchResult.length > 0) {
@@ -7182,10 +7183,23 @@ async function findBestDriverFallback(rideRequest) {
     console.log(`🔍 DEBUG: driverAvailability map size: ${driverAvailability.size}`);
     console.log(`🔍 DEBUG: Pickup location: ${pickup.lat}, ${pickup.lng}, maxRadius: ${maxSearchRadius}km`);
 
+    // Check if rider has pet
+    const riderHasPet = rideRequest.riderPreferences && rideRequest.riderPreferences.includes('with_pet');
+    
     // First try in-memory map
     let nearbyDrivers = Array.from(driverAvailability.values())
-      .filter(driver => driver.isAvailable && driver.lat && driver.lng &&
-        calculateDistance(pickup.lat, pickup.lng, driver.lat, driver.lng) <= maxSearchRadius)
+      .filter(driver => {
+        // Basic availability check
+        if (!driver.isAvailable || !driver.lat || !driver.lng) return false;
+        
+        // Distance check
+        if (calculateDistance(pickup.lat, pickup.lng, driver.lat, driver.lng) > maxSearchRadius) return false;
+        
+        // Pet preference check - if rider has pet, exclude drivers with no_pets setting
+        if (riderHasPet && driver.noPets) return false;
+        
+        return true;
+      })
       .map(driver => ({
         id: driver.driverId,
         driverId: driver.driverId,

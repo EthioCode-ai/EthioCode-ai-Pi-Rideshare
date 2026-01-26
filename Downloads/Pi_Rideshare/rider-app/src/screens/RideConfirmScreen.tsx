@@ -14,7 +14,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
+import { apiUrl } from '../config/api.config';
 import { useTheme } from '../context/ThemeContext';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { rideService } from '../services/ride.service';
@@ -73,11 +73,34 @@ const RideConfirmScreen = () => {
   const [searchError, setSearchError] = useState<string | null>(null);
   const currentRideIdRef = useRef<string | null>(null);  // ADD THIS
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [vehicleTypes, setVehicleTypes] = useState<any[]>([]);
+  const [preferences, setPreferences] = useState({
+   acOn: false,
+   quietRide: false,
+   curbside: false,
+   withPet: false,
+  });
 
   useEffect(() => {
     fetchEstimates();
-    fetchRoute();
+    fetchVehicleTypes();
   }, []);
+
+  const fetchVehicleTypes = async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const response = await fetch(apiUrl('api/settings/vehicle-types'), {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success && data.vehicleTypes) {
+        setVehicleTypes(data.vehicleTypes);
+        console.log('🚗 Vehicle types loaded:', data.vehicleTypes.map((v: any) => v.name));
+      }
+    } catch (error) {
+      console.error('Error fetching vehicle types:', error);
+    }
+  };
   // Handle voice-initiated scheduled rides
    useEffect(() => {
      if (route.params?.scheduledTime) {
@@ -282,12 +305,19 @@ const RideConfirmScreen = () => {
 
       // Make API request
       console.log('🚗 Requesting ride...');
+       // Convert preferences object to array of strings
+      const prefsArray: string[] = [];
+      if (preferences.acOn) prefsArray.push('ac_on');
+      if (preferences.quietRide) prefsArray.push('quiet_ride');
+      if (preferences.curbside) prefsArray.push('curbside');
+      if (preferences.withPet) prefsArray.push('with_pet');
+      
       const result = await rideService.requestRide(
         pickup,
         destination,
         selectedVehicle,
         'card',
-        []
+        prefsArray
       );
 
       if (result.success && result.ride) {
@@ -408,11 +438,21 @@ const RideConfirmScreen = () => {
 
   const selectedEstimate = getEstimateForVehicle(selectedVehicle);
 
-  const vehicleOptions = Object.entries(VehicleInfo).map(([key, info]) => ({
-    id: key,
-    ...info,
-    estimate: getEstimateForVehicle(key),
-  }));
+  // Use backend vehicle types if loaded, fallback to VehicleInfo
+  const vehicleOptions = vehicleTypes.length > 0 
+    ? vehicleTypes.map((vt) => ({
+        id: vt.id,
+        name: vt.name,
+        icon: vt.icon,
+        description: vt.description,
+        capacity: vt.capacity,
+        estimate: getEstimateForVehicle(vt.id),
+      }))
+    : Object.entries(VehicleInfo).map(([key, info]) => ({
+        id: key,
+        ...info,
+        estimate: getEstimateForVehicle(key),
+      }));
 
   const styles = StyleSheet.create({
     container: {
@@ -679,6 +719,10 @@ const RideConfirmScreen = () => {
       borderWidth: 1,
       borderColor: `${colors.primary}30`,
       gap: 4,
+    },
+    preferenceChipActive: {
+      backgroundColor: isDark ? '#E67E22' : '#2563eb',
+      borderColor: isDark ? '#E67E22' : '#2563eb',
     },
     preferenceText: {
       fontSize: 10,
@@ -983,7 +1027,7 @@ const RideConfirmScreen = () => {
                     <Text style={styles.vehicleName}>{vehicle.name}</Text>
                     <Text style={styles.vehicleEta}>{vehicle.estimate?.eta || 3} min</Text>
                     <Text style={styles.vehiclePrice}>
-                      ${vehicle.estimate?.totalFare?.toFixed(2) || (12 * vehicle.baseMultiplier).toFixed(2)}
+                      ${vehicle.estimate?.totalFare?.toFixed(2) || '---'}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -994,18 +1038,34 @@ const RideConfirmScreen = () => {
             </View>
 
             <View style={styles.preferencesRow}>
-              <View style={styles.preferenceChip}>
+              <TouchableOpacity 
+                style={[styles.preferenceChip, preferences.acOn ? {backgroundColor: isDark ? '#E67E22' : '#2563eb', borderColor: isDark ? '#E67E22' : '#2563eb'} : {}]}
+                onPress={() => setPreferences(p => ({ ...p, acOn: !p.acOn }))}
+              >
                 <Text>🌡️</Text>
-                <Text style={styles.preferenceText}>AC On</Text>
-              </View>
-              <View style={styles.preferenceChip}>
+                <Text style={[styles.preferenceText, preferences.acOn ? {color: '#FFFFFF', fontWeight: '600'} : {}]}>AC On</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.preferenceChip, preferences.quietRide ? {backgroundColor: isDark ? '#E67E22' : '#2563eb', borderColor: isDark ? '#E67E22' : '#2563eb'} : {}]}
+                onPress={() => setPreferences(p => ({ ...p, quietRide: !p.quietRide }))}
+              >
                 <Text>🔇</Text>
-                <Text style={styles.preferenceText}>Quiet Ride</Text>
-              </View>
-              <View style={styles.preferenceChip}>
+                <Text style={[styles.preferenceText, preferences.quietRide ? {color: '#FFFFFF', fontWeight: '600'} : {}]}>Quiet Ride</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.preferenceChip, preferences.curbside ? {backgroundColor: isDark ? '#E67E22' : '#2563eb', borderColor: isDark ? '#E67E22' : '#2563eb'} : {}]}
+                onPress={() => setPreferences(p => ({ ...p, curbside: !p.curbside }))}
+              >
                 <Text>🚪</Text>
-                <Text style={styles.preferenceText}>Curbside</Text>
-              </View>
+               <Text style={[styles.preferenceText, preferences.curbside ? {color: '#FFFFFF', fontWeight: '600'} : {}]}>Curbside</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.preferenceChip, preferences.withPet ? {backgroundColor: isDark ? '#E67E22' : '#2563eb', borderColor: isDark ? '#E67E22' : '#2563eb'} : {}]}
+                onPress={() => setPreferences(p => ({ ...p, withPet: !p.withPet }))}
+              >
+                <Text>🐕</Text>
+                <Text style={[styles.preferenceText, preferences.withPet ? {color: '#FFFFFF', fontWeight: '600'} : {}]}>With Pet</Text>
+              </TouchableOpacity>
             </View>
           </ScrollView>
         )}
