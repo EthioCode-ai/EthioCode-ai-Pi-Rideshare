@@ -11841,19 +11841,32 @@ function setupRealtimeWebSocket(server) {
 
     console.log(`🎙️ Realtime session started for user ${userId}`);
 
-    // Session state
+        // Session state
     let openaiWs = null;
     let userLocation = null;
     let retryCount = 0;
     const maxRetries = 3;
     const sessionId = `${userId}-${Date.now()}`;
     
+    // Fix #4, #6, #7: State flags for connection management
+    let intentionalClose = false;
+    let openaiConfigured = false;
+    let connecting = false;
+    
     // Store session
     realtimeSessionsMap.set(sessionId, { clientWs, userId });
 
     // Connect to OpenAI with retry logic
     const connectToOpenAI = () => {
+      // Fix #7: Prevent parallel connects
+      if (connecting) return;
+      connecting = true;
+      intentionalClose = false;
+      openaiConfigured = false;
+      
       const WebSocket = require('ws');
+      
+      // Calculate backoff with jitter
       
       // Calculate backoff with jitter
       const baseDelay = Math.min(500 * Math.pow(2, retryCount), 8000);
@@ -11875,7 +11888,8 @@ function setupRealtimeWebSocket(server) {
 
         openaiWs.on('open', () => {
           console.log('✅ Connected to OpenAI Realtime API');
-          retryCount = 0; // Reset on successful connection
+          connecting = false;
+          retryCount = 0;
           
           // Configure session in initial message (avoid session.update)
           openaiWs.send(JSON.stringify({
@@ -11888,8 +11902,7 @@ function setupRealtimeWebSocket(server) {
             }
           }));
           
-          // Notify client - ready to receive location
-          clientWs.send(JSON.stringify({ type: 'session.ready' }));
+          // Fix #6: Don't send session.ready yet - wait for session.updated
         });
 
         openaiWs.on('message', async (data) => {
@@ -11901,9 +11914,11 @@ function setupRealtimeWebSocket(server) {
               console.error(`❌ OpenAI error [${sessionId}]:`, JSON.stringify(message.error));
             }
 
-            // Handle session.updated confirmation
+            // Fix #6: Handle session.updated - now safe to accept user input
             if (message.type === 'session.updated') {
               console.log('✅ OpenAI session configured');
+              openaiConfigured = true;
+              clientWs.send(JSON.stringify({ type: 'session.ready' }));
             }
 
             // Handle tool calls
@@ -11943,13 +11958,14 @@ function setupRealtimeWebSocket(server) {
               }));
             }
 
-            // Handle server errors with retry
+            // Fix #4: Handle server errors with retry (prevent double retry)
             if (message.type === 'error' && message.error?.type === 'server_error') {
               console.log(`⚠️ Server error, will retry... [session: ${sessionId}]`);
               
               if (retryCount < maxRetries) {
                 retryCount++;
-                openaiWs.close();
+                intentionalClose = true;  // Mark as intentional so close handler doesn't also retry
+                openaiWs.close(1011, 'retrying');
                 connectToOpenAI();
               } else {
                 console.log('❌ Max retries reached, switching to fallback mode');
@@ -11961,17 +11977,11 @@ function setupRealtimeWebSocket(server) {
               return;
             }
 
-            // Forward relevant messages to client
+            // Fix #2: Only forward text events (we use text mode + local TTS)
             if (
-              message.type === 'response.audio.delta' ||
-              message.type === 'response.audio_transcript.delta' ||
-              message.type === 'response.audio_transcript.done' ||
               message.type === 'response.text.delta' ||
               message.type === 'response.text.done' ||
-              message.type === 'input_audio_buffer.speech_started' ||
-              message.type === 'input_audio_buffer.speech_stopped' ||
-              message.type === 'response.done' ||
-              message.type === 'session.updated'
+              message.type === 'response.done'
             ) {
               clientWs.send(data.toString());
             }
@@ -11987,9 +11997,13 @@ function setupRealtimeWebSocket(server) {
 
         openaiWs.on('close', (code, reason) => {
           console.log(`OpenAI WebSocket closed: ${code} ${reason || ''}`);
+          connecting = false;
           
-          // If unexpected close and we haven't hit max retries, reconnect
-          if (code !== 1000 && retryCount < maxRetries && clientWs.readyState === WebSocket.OPEN) {
+          // Fix #4: Don't retry if we closed intentionally
+          if (intentionalClose) return;
+          
+          // Fix #3: Use numeric 1 instead of WebSocket.OPEN (scope issue)
+          if (code !== 1000 && retryCount < maxRetries && clientWs.readyState === 1) {
             retryCount++;
             console.log(`⚠️ Unexpected close, retrying...`);
             connectToOpenAI();
@@ -12008,16 +12022,16 @@ function setupRealtimeWebSocket(server) {
           userLocation = message.location;
           console.log(`📍 User location received: ${userLocation.address}`);
           
-          // Update session context with location
-          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+          // Fix #5: Use 'user' role (not 'system') + Fix #3: Use numeric readyState
+          if (openaiWs && openaiWs.readyState === 1 && openaiConfigured) {
             openaiWs.send(JSON.stringify({
               type: 'conversation.item.create',
               item: {
                 type: 'message',
-                role: 'system',
+                role: 'user',
                 content: [{
                   type: 'input_text',
-                  text: `[Context] User's pickup location: ${userLocation.address} (${userLocation.lat}, ${userLocation.lng}). User ID: ${userId}.`
+                  text: `Pickup context: ${userLocation.address} (${userLocation.lat}, ${userLocation.lng}).`
                 }]
               }
             }));
@@ -12041,13 +12055,13 @@ function setupRealtimeWebSocket(server) {
           return;
         }
         
-        // Forward other messages to OpenAI
-        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        // Fix #8: Forward other messages only if configured
+        if (openaiWs && openaiWs.readyState === 1 && openaiConfigured) {
           openaiWs.send(data.toString());
         }
       } catch (e) {
-        // Binary data (audio) - forward directly
-        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        // Fix #8: Binary data (audio) - forward only if configured
+        if (openaiWs && openaiWs.readyState === 1 && openaiConfigured) {
           openaiWs.send(data);
         }
       }

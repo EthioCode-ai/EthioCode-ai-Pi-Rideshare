@@ -617,6 +617,16 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
 
   const startRecording = async () => {
     try {
+      // Clean up any existing recording first
+      if (recording) {
+        try {
+          await recording.stopAndUnloadAsync();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        setRecording(null);
+      }
+      
       // Request permissions
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
@@ -631,25 +641,24 @@ const VoiceModal: React.FC<VoiceModalProps> = (props) => {
       });
 
       // Start recording
-      const { recording } = await Audio.Recording.createAsync(
+      const { recording: newRecording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
-      
-      setRecording(recording);
+      setRecording(newRecording);
       setIsRecording(true);
       setModalState('listening');
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      
+
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      
+
       // Auto-stop after 10 seconds
       timeoutRef.current = setTimeout(() => {
         stopRecordingAndProcess();
       }, 10000);
-      
     } catch (error) {
       console.error('Failed to start recording:', error);
-      setResponse('Failed to start recording');
+      setResponse('Tap mic to try again');
+      setIsRecording(false);
     }
   };
 
