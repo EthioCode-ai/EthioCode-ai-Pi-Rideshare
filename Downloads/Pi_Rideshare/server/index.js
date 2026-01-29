@@ -109,7 +109,7 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   pingTimeout: 60000,     // Wait 60s for pong response (increased for stability)
   pingInterval: 25000,    // Send ping every 25s (increased interval)
-  transports: ['websocket', 'polling'],
+  transports: ['polling', 'websocket'],
   allowEIO3: true,        // Allow Engine.IO v3 clients
   cors: {
     origin: true,         // Allow all origins in development
@@ -3914,9 +3914,22 @@ app.get('/api/rider/:userId/saved-places', authenticateToken, async (req, res) =
 
 // Add a new saved place
 app.post('/api/rider/:userId/saved-places', authenticateToken, async (req, res) => {
-  try {
+    try {
     const { userId } = req.params;
     const { name, label, address, latitude, longitude } = req.body;
+
+    if (req.user.userId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Check 5-place limit
+    const countResult = await db.query(
+      'SELECT COUNT(*) FROM saved_places WHERE user_id = $1',
+      [userId]
+    );
+    if (parseInt(countResult.rows[0].count) >= 5) {
+      return res.status(400).json({ error: 'Maximum 5 saved places allowed. Please delete one to add a new place.' });
+    }
     
     if (req.user.userId !== userId) {
       return res.status(403).json({ error: 'Access denied' });
@@ -11805,22 +11818,35 @@ function setupRealtimeWebSocket(server) {
   const WebSocketServer = require('ws').Server;
   const wss = new WebSocketServer({ noServer: true });
 
-  server.on('upgrade', (request, socket, head) => {
-    const url = new URL(request.url, `http://${request.headers.host}`);
-    
-    if (url.pathname === '/ws/realtime') {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request, url);
-      });
-    } else {
-      socket.destroy();
-    }
-  });
+  server.on("upgrade", (request, socket, head) => {
+  console.log("⬆️ UPGRADE:", request.url);
+  const url = new URL(request.url, `http://${request.headers.host}`);
+  
+  if (url.pathname === "/ws/realtime") {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request, url);
+    });
+    return;
+  }
+  
+  // Allow Socket.IO to process its own upgrades
+  if (url.pathname.startsWith("/socket.io")) {
+    return;
+  }
+  
+  // Reject unknown upgrade paths explicitly
+  console.log("❌ Rejecting unknown upgrade path:", url.pathname);
+  socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+  socket.destroy();
+});
 
   wss.on('connection', async (clientWs, request, url) => {
-    // Only get token from URL - location comes via message
+    // Get token and location from URL
     const token = url.searchParams.get('token');
-
+    const lat = parseFloat(url.searchParams.get('lat')) || null;
+    const lng = parseFloat(url.searchParams.get('lng')) || null;
+    const address = decodeURIComponent(url.searchParams.get('address') || 'Unknown location');
+    
     // Verify token
     let userId = null;
     try {
@@ -11833,17 +11859,43 @@ function setupRealtimeWebSocket(server) {
       clientWs.close(4001, 'Invalid token');
       return;
     }
-
     if (!userId) {
       clientWs.close(4001, 'Authentication required');
       return;
     }
+    
+    // Fetch user's saved places from database
+    let savedPlacesContext = '';
+    try {
+      const savedPlacesResult = await pool.query(
+        'SELECT name, address, latitude, longitude FROM saved_places WHERE user_id = $1',
+        [userId]
+      );
+      if (savedPlacesResult.rows.length > 0) {
+        const places = savedPlacesResult.rows.map(p => 
+          `- ${p.name}: ${p.address} (${p.latitude}, ${p.longitude})`
+        ).join('\n');
+        savedPlacesContext = `\n\nUser's saved places:\n${places}`;
+      }
+    } catch (e) {
+      console.log('⚠️ Could not fetch saved places:', e.message);
+    }
+    
+    // Build dynamic context for this session
+    const userContext = `
+CURRENT SESSION CONTEXT:
+- User ID: ${userId}
+- Pickup Location: ${address} (${lat}, ${lng})
+- The pickup location is already set from GPS - do NOT ask for it unless user wants to change it.
+${savedPlacesContext}
 
-    console.log(`🎙️ Realtime session started for user ${userId}`);
+IMPORTANT: You already know who the user is and where they are. Do NOT ask for user ID, home address confirmation, or pickup location. Jump straight to asking where they want to go.`;
 
-        // Session state
+    console.log(`🎙️ Realtime session started for user ${userId} at ${address}`);
+    
+    // Session state
     let openaiWs = null;
-    let userLocation = null;
+    let userLocation = { latitude: lat, longitude: lng, address };
     let retryCount = 0;
     const maxRetries = 3;
     const sessionId = `${userId}-${Date.now()}`;
@@ -11896,7 +11948,7 @@ function setupRealtimeWebSocket(server) {
             type: 'session.update',
             session: {
               modalities: ['text'],
-              instructions: REALTIME_INSTRUCTIONS,
+              instructions: REALTIME_INSTRUCTIONS + userContext,
               tools: REALTIME_TOOLS,
               tool_choice: 'auto'
             }
