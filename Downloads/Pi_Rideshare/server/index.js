@@ -492,7 +492,7 @@ app.get('/api/places/details', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Place ID is required' });
     }
 
-    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry&key=${GOOGLE_MAPS_API_KEY}`;
+    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry,rating,user_ratings_total,opening_hours,price_level&key=${GOOGLE_MAPS_API_KEY}`;
 
     const response = await fetch(url);
     const data = await response.json();
@@ -504,6 +504,10 @@ app.get('/api/places/details', authenticateToken, async (req, res) => {
         address: data.result.formatted_address,
         latitude: data.result.geometry.location.lat,
         longitude: data.result.geometry.location.lng,
+        rating: data.result.rating || null,
+        userRatingsTotal: data.result.user_ratings_total || 0,
+        openNow: data.result.opening_hours?.open_now ?? null,
+        priceLevel: data.result.price_level ?? null,
       };
 
       res.json({ success: true, place });
