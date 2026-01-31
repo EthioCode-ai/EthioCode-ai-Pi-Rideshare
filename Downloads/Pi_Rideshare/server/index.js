@@ -2753,37 +2753,44 @@ app.post('/api/rides/request', rideLimiter, authenticateToken, async (req, res) 
       if (matchResult && matchResult.length > 0) {
         console.log(`✅ Drivers found for ride ${ride.id} - starting cascading sequence`);
         
-        // Initialize cascading ride request data
+        // Initialize cascading ride request data (structured for Driver app)
         const rideRequestData = {
           rideId: ride.id,
-          pickup: pickup.coordinates,
-          destination: destination.coordinates,
-          pickupAddress: pickup.address || 'Current Location',
-          destinationAddress: destination.address || 'Destination',
-          // Airport fields for pickup
-          pickupIsAirport: pickup.isAirport || false,
-          pickupAirportCode: pickup.airportCode,
-          pickupAirportName: pickup.airportName,
-          pickupZoneCode: pickup.zoneCode,
-          pickupZoneName: pickup.zoneName,
-          pickupDoorLocation: pickup.doorLocation,
-          // Airport fields for destination
-          destinationIsAirport: destination.isAirport || false,
-          destinationAirportCode: destination.airportCode,
-          destinationAirportName: destination.airportName,
-          destinationZoneCode: destination.zoneCode,
-          destinationZoneName: destination.zoneName,
-          destinationDoorLocation: destination.doorLocation,
+          riderId: req.user.userId,
+          riderName: riderFirstName || 'Rider',
+          riderRating: 4.8,
+          pickup: {
+            address: pickup.address || 'Current Location',
+            lat: pickup.coordinates?.lat,
+            lng: pickup.coordinates?.lng,
+            isAirport: pickup.isAirport || false,
+            airportCode: pickup.airportCode,
+            airportName: pickup.airportName,
+            zoneCode: pickup.zoneCode,
+            zoneName: pickup.zoneName,
+            doorLocation: pickup.doorLocation,
+          },
+          destination: {
+            address: destination.address || 'Destination',
+            lat: destination.coordinates?.lat,
+            lng: destination.coordinates?.lng,
+            isAirport: destination.isAirport || false,
+            airportCode: destination.airportCode,
+            airportName: destination.airportName,
+            zoneCode: destination.zoneCode,
+            zoneName: destination.zoneName,
+            doorLocation: destination.doorLocation,
+          },
           estimatedFare: estimatedFare.total || estimatedFare,
+          estimatedDistance: ride.estimated_distance || 0,
+          estimatedDuration: ride.estimated_duration || 0,
+          surgeMultiplier: ride.surge_multiplier || 1.0,
           rideType: rideType || 'standard',
           riderPreferences: riderPreferences || {
             music: false,
             conversation: false,
             temperature: 'no-preference'
           },
-          riderId: req.user.userId,
-          riderFirstName: riderFirstName,
-          riderRating: 4.8,
           availableDrivers: matchResult,
           currentDriverIndex: 0,
           attemptCount: 0,
