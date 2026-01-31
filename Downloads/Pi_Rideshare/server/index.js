@@ -3036,6 +3036,83 @@ app.post('/api/drivers/location', authenticateToken, (req, res) => {
   }
 });
 
+// Get nearby available drivers with vehicle types (for rider map)
+app.get('/api/drivers/nearby', authenticateToken, async (req, res) => {
+  try {
+    const { latitude, longitude, radius = 10 } = req.query;
+    
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: 'Latitude and longitude are required' });
+    }
+    
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+    const maxRadius = parseFloat(radius); // km
+    
+    // Get drivers from in-memory availability (most up-to-date)
+    const nearbyDrivers = [];
+    
+    for (const [driverId, driver] of driverAvailability.entries()) {
+      if (!driver.isAvailable || !driver.lat || !driver.lng) continue;
+      
+      // Calculate distance using Haversine formula
+      const dLat = (driver.lat - lat) * Math.PI / 180;
+      const dLng = (driver.lng - lng) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat * Math.PI / 180) * Math.cos(driver.lat * Math.PI / 180) *
+                Math.sin(dLng/2) * Math.sin(dLng/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const distance = 6371 * c; // Earth radius in km
+      
+      if (distance <= maxRadius) {
+        // Estimate ETA (assuming average speed of 30 km/h in city)
+        const etaMinutes = Math.max(1, Math.round(distance / 0.5)); // ~30km/h = 0.5km/min
+        
+        nearbyDrivers.push({
+          driverId,
+          latitude: driver.lat,
+          longitude: driver.lng,
+          heading: driver.heading || 0,
+          vehicleType: driver.vehicleType || 'standard',
+          distance: Math.round(distance * 10) / 10, // Round to 1 decimal
+          etaMinutes,
+        });
+      }
+    }
+    
+    // Sort by distance
+    nearbyDrivers.sort((a, b) => a.distance - b.distance);
+    
+    // Group by vehicle type for summary
+    const summary = {
+      economy: { count: 0, nearestEta: null },
+      standard: { count: 0, nearestEta: null },
+      xl: { count: 0, nearestEta: null },
+      premium: { count: 0, nearestEta: null },
+    };
+    
+    for (const driver of nearbyDrivers) {
+      const type = driver.vehicleType || 'standard';
+      if (summary[type]) {
+        summary[type].count++;
+        if (summary[type].nearestEta === null || driver.etaMinutes < summary[type].nearestEta) {
+          summary[type].nearestEta = driver.etaMinutes;
+        }
+      }
+    }
+    
+    res.json({
+      success: true,
+      drivers: nearbyDrivers,
+      summary,
+      totalNearby: nearbyDrivers.length,
+    });
+  } catch (error) {
+    console.error('Nearby drivers error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // 🚨 BULLETPROOF TRIP STATUS CHECK: Driver polls this to detect cancellations
 app.get('/api/driver/trip-status', async (req, res) => {
   try {
@@ -11697,7 +11774,7 @@ Behavior:
 - Never mention tools or technical details`;
 
 // Handle tool calls from OpenAI Realtime API
-async function handleRealtimeToolCall(toolName, args, userId) {
+async function handleRealtimeToolCall(toolName, args, userId, userLocation = null) {
   console.log(`🔧 Realtime Tool call: ${toolName}`, args);
   
   try {
@@ -11780,6 +11857,17 @@ async function handleRealtimeToolCall(toolName, args, userId) {
       
       case 'request_ride': {
         const rideUserId = args.userId || userId;
+        // Use provided pickup or fallback to user's GPS location
+        const pickupLat = args.pickupLat || userLocation?.latitude;
+        const pickupLng = args.pickupLng || userLocation?.longitude;
+        const pickupAddress = args.pickupAddress || userLocation?.address || 'Current Location';
+        
+        if (!pickupLat || !pickupLng) {
+          return { success: false, error: 'Pickup location not available' };
+        }
+        if (!args.destLat || !args.destLng) {
+          return { success: false, error: 'Destination not specified' };
+        }
         // Create the ride in database
         const result = await db.query(`
           INSERT INTO rides (
@@ -11790,7 +11878,7 @@ async function handleRealtimeToolCall(toolName, args, userId) {
           RETURNING *
         `, [
           rideUserId,
-          args.pickupLat, args.pickupLng, args.pickupAddress,
+          pickupLat, pickupLng, pickupAddress,
           args.destLat, args.destLng, args.destAddress,
           args.vehicleType,
           JSON.stringify(args.preferences || [])
@@ -12052,7 +12140,7 @@ IMPORTANT: You already know who the user is and where they are. Do NOT ask for u
               }
 
               // Execute tool on server
-              const result = await handleRealtimeToolCall(toolName, args, userId);
+               const result = await handleRealtimeToolCall(toolName, args, userId, userLocation);
               console.log(`🔧 Tool result:`, result);
 
               // Send result back to OpenAI
