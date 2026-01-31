@@ -11676,8 +11676,8 @@ async function handleRealtimeToolCall(toolName, args, userId) {
       }
       
       case 'get_saved_place': {
-        const result = await db.query(
-          `SELECT * FROM saved_places WHERE user_id = $1 AND LOWER(name) = LOWER($2)`,
+       const result = await db.query(
+          `SELECT * FROM saved_places WHERE user_id = $1 AND (LOWER(name) = LOWER($2) OR LOWER(label) = LOWER($2))`,
           [args.userId || userId, args.placeName]
         );
         if (result.rows.length > 0) {
