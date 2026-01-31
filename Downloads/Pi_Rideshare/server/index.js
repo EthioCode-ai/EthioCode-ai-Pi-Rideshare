@@ -4886,16 +4886,16 @@ const airportDriverQueues = new Map(); // Airport-specific driver queues
 let pendingRequestsCount = 0;
 
 // Missing function implementations
-function updateDriverAvailability(driverId, data) {
-  const existing = driverAvailability.get(driverId) || {};
-  const updated = { ...existing, ...data };
-  driverAvailability.set(driverId, updated);
+//function updateDriverAvailability(driverId, data) {
+ // const existing = driverAvailability.get(driverId) || {};
+  //const updated = { ...existing, ...data };
+  //driverAvailability.set(driverId, updated);
   
-  console.log(`🔄 Updated driver availability for ${driverId}:`);
-  console.log(`   - isAvailable: ${updated.isAvailable}`);
-  console.log(`   - location: ${updated.lat}, ${updated.lng}`);
-  console.log(`   - total drivers in map: ${driverAvailability.size}`);
-}
+ // console.log(`🔄 Updated driver availability for ${driverId}:`);
+ // console.log(`   - isAvailable: ${updated.isAvailable}`);
+ // console.log(`   - location: ${updated.lat}, ${updated.lng}`);
+ // console.log(`   - total drivers in map: ${driverAvailability.size}`);
+//}
 
 function removeDriverFromAirportQueue(driverId, airport) {
   const queue = airportDriverQueues.get(airport) || [];
