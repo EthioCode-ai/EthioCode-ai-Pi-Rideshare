@@ -521,6 +521,57 @@ app.get('/api/places/details', authenticateToken, async (req, res) => {
   }
 });
 
+// Nearby Search - find popular places by type near a location
+app.get('/api/places/nearby', authenticateToken, async (req, res) => {
+  try {
+    const { latitude, longitude, type, radius = 10000, keyword } = req.query;
+    
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: 'Latitude and longitude are required' });
+    }
+    
+    let url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=${radius}&key=${GOOGLE_MAPS_API_KEY}&rankby=prominence`;
+    
+    // Remove radius if using rankby=prominence (they're mutually exclusive)
+    url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`;
+    
+    if (type) {
+      url += `&type=${encodeURIComponent(type)}`;
+    }
+    if (keyword) {
+      url += `&keyword=${encodeURIComponent(keyword)}`;
+    }
+    // Use radius for bounding (prominence is default when no rankby specified)
+    url += `&radius=${radius}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.status === 'OK' || data.status === 'ZERO_RESULTS') {
+      const places = (data.results || []).map(p => ({
+        placeId: p.place_id,
+        name: p.name,
+        address: p.vicinity || p.formatted_address || '',
+        latitude: p.geometry?.location?.lat,
+        longitude: p.geometry?.location?.lng,
+        rating: p.rating || null,
+        userRatingsTotal: p.user_ratings_total || 0,
+        openNow: p.opening_hours?.open_now ?? null,
+        priceLevel: p.price_level ?? null,
+        types: p.types || [],
+      }));
+      res.json({ success: true, places });
+    } else {
+      console.error('Nearby Search API error:', data.status, data.error_message);
+      res.status(400).json({ error: 'Failed to fetch nearby places' });
+    }
+  } catch (error) {
+    console.error('Nearby search error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 // Reverse Geocode - get address from coordinates
 app.get('/api/places/reverse-geocode', authenticateToken, async (req, res) => {
   try {
