@@ -7092,36 +7092,14 @@ const driverEarnings = totalFare * (marketSettings.driverCommission / 100);
 
 console.log(`💰 Driver earnings calculation: $${totalFare} × ${marketSettings.driverCommission}% = $${driverEarnings.toFixed(2)} (Market: ${marketSettings.marketCode || 'default'})`);
   
-  // Send ride request to current driver with 7-second timeout
+ // Send ride request to current driver with 7-second timeout
   io.to(`user-${currentDriver.id}`).emit('cascading-ride-request', {
     rideId: requestData.rideId,
     riderId: requestData.riderId,
-    riderName: requestData.riderFirstName || 'Rider',
+    riderName: requestData.riderName || 'Rider',
     riderRating: requestData.riderRating || 4.8,
-    pickup: {
-      lat: requestData.pickup.lat,
-      lng: requestData.pickup.lng,
-      address: requestData.pickupAddress,
-      // Airport fields
-      isAirport: requestData.pickupIsAirport || false,
-      airportCode: requestData.pickupAirportCode,
-      airportName: requestData.pickupAirportName,
-      zoneCode: requestData.pickupZoneCode,
-      zoneName: requestData.pickupZoneName,
-      doorLocation: requestData.pickupDoorLocation
-    },
-    destination: {
-      lat: requestData.destination.lat,
-      lng: requestData.destination.lng,
-      address: requestData.destinationAddress,
-      // Airport fields
-      isAirport: requestData.destinationIsAirport || false,
-      airportCode: requestData.destinationAirportCode,
-      airportName: requestData.destinationAirportName,
-      zoneCode: requestData.destinationZoneCode,
-      zoneName: requestData.destinationZoneName,
-      doorLocation: requestData.destinationDoorLocation
-    },
+    pickup: requestData.pickup,
+    destination: requestData.destination,
     estimatedFare: driverEarnings,
     totalFare: totalFare,
     rideType: requestData.rideType,
