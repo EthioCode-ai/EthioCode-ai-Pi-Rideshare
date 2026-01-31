@@ -7093,19 +7093,14 @@ const driverEarnings = totalFare * (marketSettings.driverCommission / 100);
 console.log(`💰 Driver earnings calculation: $${totalFare} × ${marketSettings.driverCommission}% = $${driverEarnings.toFixed(2)} (Market: ${marketSettings.marketCode || 'default'})`);
   
  // Send ride request to current driver with 7-second timeout
+  // Send ride request to current driver with 7-second timeout
   io.to(`user-${currentDriver.id}`).emit('cascading-ride-request', {
     rideId: requestData.rideId,
     riderId: requestData.riderId,
     riderName: requestData.riderName || 'Rider',
     riderRating: requestData.riderRating || 4.8,
-    pickup: {
-      ...requestData.pickup,
-      address: requestData.pickupAddress,
-    },
-    destination: {
-      ...requestData.destination,
-      address: requestData.destinationAddress,
-    },
+    pickup: requestData.pickup,
+    destination: requestData.destination,
     estimatedFare: driverEarnings,
     totalFare: totalFare,
     rideType: requestData.rideType,
