@@ -7098,8 +7098,14 @@ console.log(`💰 Driver earnings calculation: $${totalFare} × ${marketSettings
     riderId: requestData.riderId,
     riderName: requestData.riderName || 'Rider',
     riderRating: requestData.riderRating || 4.8,
-    pickup: requestData.pickup,
-    destination: requestData.destination,
+    pickup: {
+      ...requestData.pickup,
+      address: requestData.pickupAddress,
+    },
+    destination: {
+      ...requestData.destination,
+      address: requestData.destinationAddress,
+    },
     estimatedFare: driverEarnings,
     totalFare: totalFare,
     rideType: requestData.rideType,
